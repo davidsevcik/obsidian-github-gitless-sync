@@ -304,6 +304,102 @@ export default class SyncManager {
   }
 
   /**
+   * Returns true if a file in the remote tree is one we'd sync if it was in
+   * the vault. Files this plugin never tracks, like hidden files, must not
+   * be downloaded just because they're in the remote repository.
+   */
+  private isSyncableRemoteFile(filePath: string): boolean {
+    if (filePath === GITIGNORE_FILE_NAME) {
+      return true;
+    }
+    const folders = filePath.split("/").slice(0, -1);
+    if (
+      folders.some((_: string, index: number) =>
+        this.isExcludedFolder(folders.slice(0, index + 1).join("/")),
+      )
+    ) {
+      return false;
+    }
+    return (
+      !this.isDeviceSpecificConfig(filePath) &&
+      this.isSyncableHiddenFolderFile(filePath)
+    );
+  }
+
+  /**
+   * Updates the remote metadata with the changes made to the remote repository
+   * by commits not made by this plugin, like the ones pushed with git, made on
+   * the GitHub website or by GitHub Actions.
+   * Those don't update the manifest, so it would still have the old SHA of the
+   * files they changed, or not have the files they added at all, and we would
+   * never download them. The remote tree is what's actually in the remote, so
+   * when the two don't agree we trust the tree.
+   *
+   * @param remoteMetadata Metadata read from the remote manifest, it's updated in place
+   * @param remoteTree All files in the remote repository
+   */
+  private async applyExternalChanges(
+    remoteMetadata: Metadata,
+    remoteTree: { [key: string]: GetTreeResponseItem },
+  ) {
+    const manifestPath = `${this.vault.configDir}/${MANIFEST_FILE_NAME}`;
+    const changed: string[] = [];
+    // We don't know when the change has been made, only that it's not older
+    // than now. Using now means that if the file has been deleted locally
+    // too, the remote change wins and the file is downloaded again, which is
+    // better than losing it.
+    const now = Date.now();
+    Object.keys(remoteTree)
+      .filter(
+        (filePath: string) =>
+          filePath !== manifestPath && this.isSyncableRemoteFile(filePath),
+      )
+      .forEach((filePath: string) => {
+        const tracked = remoteMetadata.files[filePath];
+        if (
+          tracked &&
+          !tracked.deleted &&
+          tracked.sha === remoteTree[filePath].sha
+        ) {
+          return;
+        }
+        changed.push(filePath);
+        remoteMetadata.files[filePath] = {
+          path: filePath,
+          sha: remoteTree[filePath].sha,
+          dirty: false,
+          justDownloaded: false,
+          lastModified: now,
+        };
+      });
+
+    const deleted: string[] = [];
+    Object.keys(remoteMetadata.files)
+      .filter(
+        (filePath: string) =>
+          filePath !== manifestPath &&
+          !remoteMetadata.files[filePath].deleted &&
+          !remoteTree[filePath],
+      )
+      .forEach((filePath: string) => {
+        // The file has been deleted from the remote, or it has never got
+        // there. Either way the manifest is wrong. Once it's gone from it
+        // the file is handled like any other that is only in the vault: it's
+        // deleted locally if it has been synced before and has not changed
+        // since, otherwise it's uploaded.
+        deleted.push(filePath);
+        delete remoteMetadata.files[filePath];
+      });
+
+    if (changed.length > 0 || deleted.length > 0) {
+      await this.logger.info("Found changes made outside of the plugin", {
+        changed,
+        deleted,
+      });
+    }
+  }
+
+  /**
    * Updates the local metadata with the changes we can't get events for and
    * loads the ignore rules.
    * Must be called before starting any sync.
@@ -785,21 +881,9 @@ export default class SyncManager {
       decodeBase64String(blob.content),
     );
 
-    if (
-      files[GITIGNORE_FILE_NAME] &&
-      !remoteMetadata.files[GITIGNORE_FILE_NAME]
-    ) {
-      // The .gitignore has been added to the repo by something else, like git,
-      // so it's not in the manifest. We treat it as if it was or it would
-      // never be downloaded.
-      remoteMetadata.files[GITIGNORE_FILE_NAME] = {
-        path: GITIGNORE_FILE_NAME,
-        sha: files[GITIGNORE_FILE_NAME].sha,
-        dirty: false,
-        justDownloaded: false,
-        lastModified: 0,
-      };
-    }
+    // Commits not made by this plugin don't update the manifest, so it might
+    // not know about all the changes in the remote.
+    await this.applyExternalChanges(remoteMetadata, files);
     // Ignored files that are still tracked remotely must be left alone
     this.removeIgnoredFiles(remoteMetadata.files);
 
@@ -877,6 +961,8 @@ export default class SyncManager {
       );
       gitignoreDownloaded.push(GITIGNORE_FILE_NAME);
       await this.gitignore.load();
+      // Files the old rules ignored might not be ignored anymore
+      await this.applyExternalChanges(remoteMetadata, files);
       this.removeIgnoredFiles(this.metadataStore.data.files);
       this.removeIgnoredFiles(remoteMetadata.files);
       conflictActions = conflictActions.filter(
@@ -1267,7 +1353,14 @@ export default class SyncManager {
       return null;
     }
     const contentBuffer = await this.vault.adapter.readBinary(filePath);
-    const contentBytes = new Uint8Array(contentBuffer);
+    return await this.calculateBlobSHA(new Uint8Array(contentBuffer));
+  }
+
+  /**
+   * Calculates the SHA git gives to a blob with this content.
+   * @param contentBytes content of the blob
+   */
+  private async calculateBlobSHA(contentBytes: Uint8Array): Promise<string> {
     const header = new TextEncoder().encode(`blob ${contentBytes.length}\0`);
     const store = new Uint8Array([...header, ...contentBytes]);
     return await crypto.subtle.digest("SHA-1", store).then((hash) =>
@@ -1354,7 +1447,17 @@ export default class SyncManager {
           // to determine the file type, though I feel it's ok to compromise and rely
           // on them if it makes the plugin handle upload better on certain devices.
           if (hasTextExtension(filePath)) {
-            newSHAs[filePath] = await this.calculateSHA(filePath);
+            const resolution = conflictResolutions.find(
+              (c: ConflictResolution) => c.filePath === filePath,
+            );
+            // The content of a conflict resolution is written to the local
+            // file only after the sync is done, so the SHA must be the one
+            // of the content we upload, not of the file.
+            newSHAs[filePath] = resolution?.content
+              ? await this.calculateBlobSHA(
+                  new TextEncoder().encode(resolution.content),
+                )
+              : await this.calculateSHA(filePath);
             return;
           }
 

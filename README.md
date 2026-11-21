@@ -168,6 +168,7 @@ This fork started from version 1.0.7 of the original plugin. These are the diffe
 - Deleted files are deleted from the other devices too, and are tracked for 30 days instead of forever
 - A sync can't revert the changes of the previous one, or overwrite changes made to the remote repository while syncing
 - Sync commits and notifications tell which files changed, and commits tell the device too
+- Changes committed to the remote repository outside of the plugin, with git, on the GitHub website or by GitHub Actions, are synced too
 
 ## FAQs
 
@@ -189,9 +190,9 @@ Also since this relies only on the GitHub APIs you can only sync with GitHub and
 
 No.
 
-To work correctly this plugin uses a custom metadata file that is updated every time we sync, if you commit changes outside the plugin that file is not updated properly.
+To work correctly this plugin uses a custom metadata file that is updated every time we sync. Other plugins don't know about that file, so if you sync with others too you risk losing data.
 
-Other plugins don't know about that file, so if you sync with others too you risk losing data.
+You can still commit to the repository outside of Obsidian, with git, on the GitHub website or with GitHub Actions. The plugin finds those changes by comparing the files in the repository with its metadata file. If a file changed there has also changed in the vault you're asked to solve the conflict, and if it has been deleted there but edited in the vault it's kept and uploaded again.
 
 ## Contributing
 
