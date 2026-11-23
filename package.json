@@ -7,7 +7,9 @@
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "version": "node version-bump.mjs",
-    "benchmark": "tsx benchmark.ts"
+    "benchmark": "tsx benchmark.ts",
+    "e2e": "tsx e2e/run.ts",
+    "e2e:check": "tsc -noEmit -p e2e"
   },
   "keywords": [],
   "author": "David Sevcik",
