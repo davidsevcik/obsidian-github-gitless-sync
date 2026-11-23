@@ -4,6 +4,7 @@ import { GitHubSyncSettings } from "./settings/settings";
 import Logger, { LOG_FILE_NAME } from "./logger";
 import GitHubSyncPlugin from "./main";
 import GitIgnore from "./gitignore";
+import { calculateFileSHA } from "./utils";
 
 /**
  * Tracks changes to local sync directory and updates files metadata.
@@ -39,13 +40,9 @@ export default class EventsListener {
       return;
     }
 
-    const data = this.metadataStore.data.files[file.path];
-    if (data && data.justDownloaded) {
-      // This file was just downloaded and not created by the user.
-      // It's enough to mark it as non just downloaded.
-      this.metadataStore.data.files[file.path].justDownloaded = false;
-      await this.metadataStore.save();
-      await this.logger.info("Updated just downloaded created file", file.path);
+    if (await this.isSyncedContent(file.path)) {
+      // The file has been written by a sync, not created by the user
+      await this.logger.info("Skipped created file with synced content", file.path);
       return;
     }
 
@@ -94,18 +91,15 @@ export default class EventsListener {
       // Skip folders
       return;
     }
-    const data = this.metadataStore.data.files[file.path];
-    if (data && data.justDownloaded) {
-      // This file was just downloaded and not modified by the user.
-      // It's enough to makr it as non just downloaded.
-      this.metadataStore.data.files[file.path].justDownloaded = false;
-      await this.metadataStore.save();
+    if (await this.isSyncedContent(file.path)) {
+      // The file has been written by a sync, not modified by the user
       await this.logger.info(
-        "Updated just downloaded modified file",
+        "Skipped modified file with synced content",
         file.path,
       );
       return;
     }
+    const data = this.metadataStore.data.files[file.path];
     if (!data) {
       // The file is not tracked, this can happen if it was ignored and
       // it's not anymore. Handle it as if it has just been created.
@@ -145,6 +139,31 @@ export default class EventsListener {
       await this.onDelete(oldPath);
       return;
     }
+  }
+
+  /**
+   * Returns true if the file has the content it had after the last sync, so
+   * an event for it is not a change made by the user. That's the case for
+   * the events Obsidian sends when a sync downloads a file.
+   *
+   * The sync updates the metadata before writing the file, so it's always up
+   * to date when the event arrives. We compare the content instead of marking
+   * the file as just downloaded, since Obsidian doesn't send an event for every
+   * write, and a mark left behind would make us miss the next user change.
+   */
+  private async isSyncedContent(filePath: string): Promise<boolean> {
+    const data = this.metadataStore.data.files[filePath];
+    if (!data || data.deleted || data.sha === null) {
+      return false;
+    }
+    const synced = (await calculateFileSHA(this.vault, filePath)) === data.sha;
+    if (synced && data.justDownloaded) {
+      // Not used anymore, but older versions rely on it if the plugin is
+      // downgraded
+      data.justDownloaded = false;
+      await this.metadataStore.save();
+    }
+    return synced;
   }
 
   private isSyncable(filePath: string) {

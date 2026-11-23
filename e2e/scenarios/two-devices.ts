@@ -151,8 +151,7 @@ export default [
 
   scenario({
     name: "file deleted on a device and edited later on the other is kept",
-    knownBug:
-      "a downloaded file is written before it's marked as just downloaded, so its create event is taken for the user's and the first real edit is ignored",
+    tags: ["regression"],
     devices,
     seed: { "README.md": "# E2E\n", "Contested.md": "v1\n" },
     async run({ a, b, remote, step }) {
@@ -167,6 +166,30 @@ export default [
       await expectRemote(remote, { "Contested.md": "v2\n" });
       await step("A gets it back", () => a.sync());
       await expectLocal(a, { "Contested.md": "v2\n" });
+      await expectInSync(remote, [a, b]);
+    },
+  }),
+
+  scenario({
+    name: "file downloaded by a sync, deleted on the other device and edited is kept",
+    tags: ["regression"],
+    devices,
+    async run({ a, b, remote, step }) {
+      await step("A creates a note, B downloads it", async () => {
+        await a.create("Downloaded.md", "v1\n");
+        await a.sync();
+        await b.sync();
+      });
+      await step("A deletes it", async () => {
+        await a.delete("Downloaded.md");
+        await a.sync();
+      });
+      await step("B edits it after the deletion", async () => {
+        await b.modify("Downloaded.md", "v2\n");
+        await b.sync();
+      });
+      await expectRemote(remote, { "Downloaded.md": "v2\n" });
+      await step("A gets it back", () => a.sync());
       await expectInSync(remote, [a, b]);
     },
   }),

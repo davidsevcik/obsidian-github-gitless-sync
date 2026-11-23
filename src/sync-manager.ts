@@ -24,7 +24,12 @@ import {
   buildSyncSummary,
 } from "./commit-message";
 import Logger, { LOG_FILE_NAME } from "./logger";
-import { decodeBase64String, hasTextExtension } from "./utils";
+import {
+  calculateBlobSHA,
+  calculateFileSHA,
+  decodeBase64String,
+  hasTextExtension,
+} from "./utils";
 import GitHubSyncPlugin from "./main";
 import GitIgnore, { GITIGNORE_FILE_NAME } from "./gitignore";
 import { BlobReader, Entry, Uint8ArrayWriter, ZipReader } from "@zip.js/zip.js";
@@ -653,11 +658,8 @@ export default class SyncManager {
         }
 
         const normalizedPath = normalizePath(targetPath);
-        await this.vault.adapter.writeBinary(normalizedPath, data);
-        await this.logger.info("Written file", {
-          normalizedPath,
-        });
-        downloaded.push(normalizedPath);
+        // The metadata must be updated before writing, so the events
+        // listener knows the write is ours when it gets its event
         this.metadataStore.data.files[normalizedPath] = {
           path: normalizedPath,
           sha: files[normalizedPath].sha,
@@ -665,6 +667,16 @@ export default class SyncManager {
           justDownloaded: true,
           lastModified: Date.now(),
         };
+        try {
+          await this.vault.adapter.writeBinary(normalizedPath, data);
+        } catch (err) {
+          delete this.metadataStore.data.files[normalizedPath];
+          throw err;
+        }
+        await this.logger.info("Written file", {
+          normalizedPath,
+        });
+        downloaded.push(normalizedPath);
         await this.metadataStore.save();
       }),
     );
@@ -1333,26 +1345,7 @@ export default class SyncManager {
    * @returns String containing the file SHA1 or null in case the file doesn't exist
    */
   async calculateSHA(filePath: string): Promise<string | null> {
-    if (!(await this.vault.adapter.exists(filePath))) {
-      // The file doesn't exist, can't calculate any SHA
-      return null;
-    }
-    const contentBuffer = await this.vault.adapter.readBinary(filePath);
-    return await this.calculateBlobSHA(new Uint8Array(contentBuffer));
-  }
-
-  /**
-   * Calculates the SHA git gives to a blob with this content.
-   * @param contentBytes content of the blob
-   */
-  private async calculateBlobSHA(contentBytes: Uint8Array): Promise<string> {
-    const header = new TextEncoder().encode(`blob ${contentBytes.length}\0`);
-    const store = new Uint8Array([...header, ...contentBytes]);
-    return await crypto.subtle.digest("SHA-1", store).then((hash) =>
-      Array.from(new Uint8Array(hash))
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join(""),
-    );
+    return await calculateFileSHA(this.vault, filePath);
   }
 
   /**
@@ -1439,7 +1432,7 @@ export default class SyncManager {
             // file only after the sync is done, so the SHA must be the one
             // of the content we upload, not of the file.
             newSHAs[filePath] = resolution?.content
-              ? await this.calculateBlobSHA(
+              ? await calculateBlobSHA(
                   new TextEncoder().encode(resolution.content),
                 )
               : await this.calculateSHA(filePath);
@@ -1555,10 +1548,9 @@ export default class SyncManager {
     if (!(await this.vault.adapter.exists(fileFolder))) {
       await this.vault.adapter.mkdir(fileFolder);
     }
-    await this.vault.adapter.writeBinary(
-      normalizedPath,
-      base64ToArrayBuffer(blob.content),
-    );
+    // The metadata must be updated before writing, so the events listener
+    // knows the write is ours when it gets its event
+    const previous = this.metadataStore.data.files[file.path];
     this.metadataStore.data.files[file.path] = {
       path: file.path,
       sha: file.sha,
@@ -1566,6 +1558,19 @@ export default class SyncManager {
       justDownloaded: true,
       lastModified: lastModified,
     };
+    try {
+      await this.vault.adapter.writeBinary(
+        normalizedPath,
+        base64ToArrayBuffer(blob.content),
+      );
+    } catch (err) {
+      if (previous) {
+        this.metadataStore.data.files[file.path] = previous;
+      } else {
+        delete this.metadataStore.data.files[file.path];
+      }
+      throw err;
+    }
     await this.metadataStore.save();
   }
 

@@ -1,4 +1,4 @@
-import { base64ToArrayBuffer } from "obsidian";
+import { Vault, base64ToArrayBuffer } from "obsidian";
 
 const TEXT_EXTENSIONS = [
   ".css",
@@ -96,4 +96,36 @@ export async function retryUntil<T>(
     await new Promise((resolve) => setTimeout(resolve, delay));
     delay *= backoffFactor;
   }
+}
+
+/**
+ * Calculates the SHA git gives to a blob with this content.
+ * @param contentBytes content of the blob
+ */
+export async function calculateBlobSHA(
+  contentBytes: Uint8Array,
+): Promise<string> {
+  const header = new TextEncoder().encode(`blob ${contentBytes.length}\0`);
+  const store = new Uint8Array([...header, ...contentBytes]);
+  return await crypto.subtle.digest("SHA-1", store).then((hash) =>
+    Array.from(new Uint8Array(hash))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join(""),
+  );
+}
+
+/**
+ * Calculates the SHA git gives to the content of a file.
+ * @param filePath normalized path to the file
+ * @returns the SHA, or null if the file doesn't exist
+ */
+export async function calculateFileSHA(
+  vault: Vault,
+  filePath: string,
+): Promise<string | null> {
+  if (!(await vault.adapter.exists(filePath))) {
+    return null;
+  }
+  const contentBuffer = await vault.adapter.readBinary(filePath);
+  return await calculateBlobSHA(new Uint8Array(contentBuffer));
 }
