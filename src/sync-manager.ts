@@ -904,22 +904,18 @@ export default class SyncManager {
 
         // It's not necessary to set conflict resolutions as the content the
         // user expect must be the content of the remote file with no changes.
-        conflictActions = conflictResolutions.map(
-          (resolution: ConflictResolution) => {
-            return { type: "download", filePath: resolution.filePath };
-          },
-        );
+        conflictActions = conflicts.map((conflict: ConflictFile) => {
+          return { type: "download", filePath: conflict.filePath };
+        });
       } else if (this.settings.conflictHandling === "overwriteRemote") {
         // The user explicitly wants to always overwrite the remote file
         // in case of conflicts so we just upload the remote file to solve it.
 
         // It's not necessary to set conflict resolutions as the content the
         // user expect must be the content of the local file with no changes.
-        conflictActions = conflictResolutions.map(
-          (resolution: ConflictResolution) => {
-            return { type: "upload", filePath: resolution.filePath };
-          },
-        );
+        conflictActions = conflicts.map((conflict: ConflictFile) => {
+          return { type: "upload", filePath: conflict.filePath };
+        });
       }
     }
 
