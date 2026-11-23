@@ -128,19 +128,8 @@ export default class SyncManager {
   }
 
   /**
-   * Returns true if the file is in a hidden folder, meaning one whose name
-   * starts with a dot, at any depth. The config dir is one of those.
-   */
-  private isInHiddenFolder(filePath: string): boolean {
-    return filePath
-      .split("/")
-      .slice(0, -1)
-      .some((segment: string) => segment.startsWith("."));
-  }
-
-  /**
    * Returns true if we must not look into the folder when searching
-   * for changes in hidden folders.
+   * for changes in the vault.
    */
   private isExcludedFolder(folder: string): boolean {
     if (UNSYNCABLE_FOLDERS.includes(folder.split("/").last() as string)) {
@@ -154,10 +143,21 @@ export default class SyncManager {
   }
 
   /**
-   * Returns true if the file in a hidden folder can be synced.
-   * The manifest is not considered as it's handled on its own.
+   * Returns true if the file is in a folder we don't look into.
    */
-  private isSyncableHiddenFolderFile(filePath: string): boolean {
+  private isInExcludedFolder(filePath: string): boolean {
+    const folders = filePath.split("/").slice(0, -1);
+    return folders.some((_: string, index: number) =>
+      this.isExcludedFolder(folders.slice(0, index + 1).join("/")),
+    );
+  }
+
+  /**
+   * Returns true if the file can be synced, ignoring the folder it's in.
+   * The manifest and the .gitignore are not considered as they're handled
+   * on their own.
+   */
+  private isSyncableFile(filePath: string): boolean {
     const configDir = this.vault.configDir;
     if (
       filePath === `${configDir}/${MANIFEST_FILE_NAME}` ||
@@ -177,21 +177,21 @@ export default class SyncManager {
   }
 
   /**
-   * Makes sure the metadata reflects the files in hidden folders, the
-   * config dir included if the user wants to sync it.
-   * Obsidian doesn't send events for anything in there, so files that are
-   * created or deleted, like when installing or uninstalling a plugin, would
-   * go unnoticed if we didn't check those folders ourselves.
+   * Makes sure the metadata reflects the files in the vault.
+   * We get events only for the files created or deleted while the plugin is
+   * running, and never for the ones in hidden folders, the config dir included.
+   * Files added or removed while Obsidian was closed or the plugin disabled,
+   * by another app or by a sync tool, and the ones in hidden folders, like when
+   * installing or uninstalling a plugin, would go unnoticed if we didn't check
+   * the vault ourselves.
    * Changes to the content of the files are found when syncing by comparing SHAs.
    */
-  private async trackHiddenFoldersChanges() {
+  private async trackFilesChanges() {
     const configDir = this.vault.configDir;
     const metadataFiles = this.metadataStore.data.files;
 
     // Track new files, or files that have been created again after being deleted.
-    // Hidden folders can be anywhere so we need to go through all the folders,
-    // though we only care about the files in the hidden ones. We get events for
-    // all the others.
+    const found = new Set<string>();
     const folders = [this.vault.getRoot().path];
     while (folders.length > 0) {
       const folder = folders.pop() as string;
@@ -200,15 +200,13 @@ export default class SyncManager {
         ...res.folders.filter((f: string) => !this.isExcludedFolder(f)),
       );
       for (const filePath of res.files) {
-        if (
-          !this.isInHiddenFolder(filePath) ||
-          !this.isSyncableHiddenFolderFile(filePath)
-        ) {
+        found.add(filePath);
+        if (!this.isSyncableFile(filePath)) {
           continue;
         }
         const metadata = metadataFiles[filePath];
         if (!metadata || metadata.deleted) {
-          await this.logger.info("Found new file in hidden folder", filePath);
+          await this.logger.info("Found new file", filePath);
           metadataFiles[filePath] = {
             path: filePath,
             sha: null,
@@ -223,25 +221,23 @@ export default class SyncManager {
     // Mark as deleted the tracked files that don't exist anymore
     await Promise.all(
       Object.keys(metadataFiles)
-        .filter((filePath: string) => {
-          if (
-            metadataFiles[filePath].deleted ||
-            filePath === `${configDir}/${MANIFEST_FILE_NAME}` ||
-            !this.isInHiddenFolder(filePath)
-          ) {
-            return false;
-          }
-          // Leave alone the files in folders we don't look into
-          const segments = filePath.split("/").slice(0, -1);
-          return !segments.some((_: string, index: number) =>
-            this.isExcludedFolder(segments.slice(0, index + 1).join("/")),
-          );
-        })
+        .filter(
+          (filePath: string) =>
+            !metadataFiles[filePath].deleted &&
+            !found.has(filePath) &&
+            filePath !== `${configDir}/${MANIFEST_FILE_NAME}` &&
+            // trackGitignore handles it
+            filePath !== GITIGNORE_FILE_NAME &&
+            // Leave alone the files in folders we don't look into
+            !this.isInExcludedFolder(filePath),
+        )
         .map(async (filePath: string) => {
+          // Listing might not return exactly the path we track, e.g. if
+          // its case is different, so we make sure the file is really gone.
           if (await this.vault.adapter.exists(filePath)) {
             return;
           }
-          await this.logger.info("Found deleted file in hidden folder", filePath);
+          await this.logger.info("Found deleted file", filePath);
           metadataFiles[filePath].deleted = true;
           metadataFiles[filePath].deletedAt = Date.now();
         }),
@@ -312,17 +308,10 @@ export default class SyncManager {
     if (filePath === GITIGNORE_FILE_NAME) {
       return true;
     }
-    const folders = filePath.split("/").slice(0, -1);
-    if (
-      folders.some((_: string, index: number) =>
-        this.isExcludedFolder(folders.slice(0, index + 1).join("/")),
-      )
-    ) {
-      return false;
-    }
     return (
+      !this.isInExcludedFolder(filePath) &&
       !this.isDeviceSpecificConfig(filePath) &&
-      this.isSyncableHiddenFolderFile(filePath)
+      this.isSyncableFile(filePath)
     );
   }
 
@@ -407,7 +396,7 @@ export default class SyncManager {
   private async refreshLocalMetadata() {
     await this.gitignore.load();
     await this.trackGitignore();
-    await this.trackHiddenFoldersChanges();
+    await this.trackFilesChanges();
     this.removeIgnoredFiles(this.metadataStore.data.files);
     await this.metadataStore.save();
   }
@@ -1659,7 +1648,7 @@ export default class SyncManager {
    */
   async addConfigDirToMetadata() {
     await this.logger.info("Adding config dir to metadata");
-    await this.trackHiddenFoldersChanges();
+    await this.trackFilesChanges();
     await this.metadataStore.save();
   }
 

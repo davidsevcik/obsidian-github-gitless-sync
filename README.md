@@ -163,6 +163,7 @@ This fork started from version 1.0.7 of the original plugin. These are the diffe
 
 - The first sync downloads the configs of the remote repository in a new vault, if config sync is enabled
 - Files added or removed in the config folder, and in any other hidden folder, are synced. For example when installing or uninstalling a plugin
+- Files added or removed while Obsidian is closed, or by other apps, are synced too
 - Files can be excluded from syncing with a `.gitignore`
 - The settings of this plugin, that contain the GitHub token, are never synced
 - Deleted files are deleted from the other devices too, and are tracked for 30 days instead of forever
