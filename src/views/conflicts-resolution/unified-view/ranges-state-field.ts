@@ -8,6 +8,9 @@ export type RangeUpdateOperation =
 
 export const UpdateRangesEffect = StateEffect.define<RangeUpdateOperation>();
 
+/// Removes all the ranges, used when every conflict is resolved at once.
+export const ClearRangesEffect = StateEffect.define<null>();
+
 export type RangeChangeSourceOperation = {
   index: number;
   newSource: "remote" | "local" | "both";
@@ -25,6 +28,9 @@ export const createRangesStateField = (
   return StateField.define<ConflictRange[]>({
     create: () => initialRanges,
     update: (ranges, tr) => {
+      if (tr.effects.some((e) => e.is(ClearRangesEffect))) {
+        return [];
+      }
       const rangeEffects = tr.effects
         .filter((e) => e.is(UpdateRangesEffect))
         .reduce((acc, e) => {
@@ -52,7 +58,11 @@ export const createRangesStateField = (
           };
         })
         .filter((range, index) => {
-          return range.from !== range.to && !rangeEffects.has(index);
+          // A range that collapsed was deleted, unless it was already empty
+          // because it's a single empty line
+          const collapsed =
+            range.from === range.to && ranges[index].from !== ranges[index].to;
+          return !collapsed && !rangeEffects.has(index);
         });
 
       // Sort ranges by start position (leftmost first)

@@ -9,6 +9,7 @@ import { Decoration, EditorView, WidgetType } from "@codemirror/view";
 import { createRoot } from "react-dom/client";
 import UnifiedResolutionBar from "./unified-resolution-bar";
 import { UpdateRangesEffect } from "./ranges-state-field";
+import { deleteLines } from "./accept-all";
 
 interface ResolutionWidgetProps {
   onAcceptRemote: () => void;
@@ -86,11 +87,7 @@ export const createResolutionDecorations = (
 
       // The widget of a range that comes from a single document, accepting
       // its side keeps the lines and accepting the other side deletes them.
-      const oneSidedWidget = (
-        range: ConflictRange,
-        index: number,
-        nextRange: ConflictRange | undefined,
-      ) => {
+      const oneSidedWidget = (range: ConflictRange, index: number) => {
         const keep = () => {
           getView().dispatch({
             effects: UpdateRangesEffect.of({
@@ -100,12 +97,9 @@ export const createResolutionDecorations = (
           });
         };
         const discard = () => {
-          getView().dispatch({
-            changes: {
-              from: Math.max(range.from - 1, 0),
-              to: nextRange?.from || range.to,
-              insert: "",
-            },
+          const view = getView();
+          view.dispatch({
+            changes: deleteLines(view.state.doc, range.from, range.to),
             effects: UpdateRangesEffect.of({
               index: index,
             }),
@@ -185,12 +179,13 @@ export const createResolutionDecorations = (
                   });
                 },
                 onDiscardBoth: () => {
-                  getView().dispatch({
-                    changes: {
-                      from: Math.max(range.from - 1, 0),
-                      to: ranges.at(index + 2)?.from || nextRange.to,
-                      insert: "",
-                    },
+                  const view = getView();
+                  view.dispatch({
+                    changes: deleteLines(
+                      view.state.doc,
+                      range.from,
+                      nextRange.to,
+                    ),
                     effects: [
                       UpdateRangesEffect.of({
                         index,
@@ -207,7 +202,7 @@ export const createResolutionDecorations = (
             });
             widgets.push(deco.range(range.to));
           } else {
-            widgets.push(oneSidedWidget(range, index, nextRange));
+            widgets.push(oneSidedWidget(range, index));
           }
         } else if (
           range.source === "local" &&
@@ -215,7 +210,7 @@ export const createResolutionDecorations = (
         ) {
           // We draw this only in case the previous range doesn't come from the old document
           // since we handle that above
-          widgets.push(oneSidedWidget(range, index, nextRange));
+          widgets.push(oneSidedWidget(range, index));
         }
       });
 
