@@ -1,31 +1,35 @@
 import * as React from "react";
 import { ConflictFile, ConflictResolution } from "src/sync-manager";
-import DiffView from "./diff-view";
+import DiffView, { DiffViewHandle } from "./diff-view";
+import { Side, sideContent } from "../side";
+import AcceptAllBar from "../accept-all-bar";
+import { ConfirmAcceptAll } from "../confirm-accept-all";
+import NoConflicts from "../no-conflicts";
 
 const UnifiedView = ({
   initialFiles,
   onResolveAllConflicts,
+  confirmAcceptAll,
 }: {
   initialFiles: ConflictFile[];
   onResolveAllConflicts: (resolutions: ConflictResolution[]) => void;
+  confirmAcceptAll: ConfirmAcceptAll;
 }) => {
   const [files, setFiles] = React.useState(initialFiles);
   const [resolvedConflicts, setResolvedConflicts] = React.useState<
     ConflictResolution[]
   >([]);
+  const diffViews = React.useRef(new Map<string, DiffViewHandle>());
 
-  const onConflictResolved = (fileIndex: number, content: string) => {
-    // Remove the file from the conflicts to resolve
-    const remainingFiles = files.filter((_, index) => index !== fileIndex);
+  const resolveFiles = (resolutions: ConflictResolution[]) => {
+    const resolvedPaths = new Set(resolutions.map((r) => r.filePath));
+    // Remove the files from the conflicts to resolve
+    const remainingFiles = files.filter(
+      (file) => !resolvedPaths.has(file.filePath),
+    );
     setFiles(remainingFiles);
     // Keep track of the resolved conflicts
-    const newResolvedConflicts = [
-      ...resolvedConflicts,
-      {
-        filePath: files[fileIndex].filePath,
-        content,
-      },
-    ];
+    const newResolvedConflicts = [...resolvedConflicts, ...resolutions];
     setResolvedConflicts(newResolvedConflicts);
     if (remainingFiles.length === 0) {
       // We solved all conflicts, we can resume syncing
@@ -33,7 +37,23 @@ const UnifiedView = ({
     }
   };
 
-  const renderConflict = (file: ConflictFile, index: number) => {
+  /// Every conflict left in each file keeps the given side, the conflicts
+  /// already resolved in the editors are kept.
+  const acceptAllFiles = async (side: Side) => {
+    if (!(await confirmAcceptAll(side, files.length))) {
+      return;
+    }
+    resolveFiles(
+      files.map((file) => ({
+        filePath: file.filePath,
+        content:
+          diffViews.current.get(file.filePath)?.resolvedContent(side) ??
+          sideContent(file, side),
+      })),
+    );
+  };
+
+  const renderConflict = (file: ConflictFile) => {
     return (
       <div
         key={file.filePath}
@@ -57,10 +77,17 @@ const UnifiedView = ({
           {file.filePath}
         </div>
         <DiffView
+          ref={(handle) => {
+            if (handle) {
+              diffViews.current.set(file.filePath, handle);
+            } else {
+              diffViews.current.delete(file.filePath);
+            }
+          }}
           initialRemoteText={file.remoteContent || ""}
           initialLocalText={file.localContent || ""}
           onConflictResolved={(content: string) => {
-            onConflictResolved(index, content);
+            resolveFiles([{ filePath: file.filePath, content }]);
           }}
         />
       </div>
@@ -78,36 +105,15 @@ const UnifiedView = ({
         }}
       >
         {files.length === 0 ? (
-          <div
-            style={{
-              position: "relative",
-              textAlign: "center",
-              alignSelf: "center",
-            }}
-          >
-            <div
-              style={{
-                margin: "20px 0",
-                fontWeight: "var(--h2-weight)",
-                fontSize: "var(--h2-size)",
-                lineHeight: "var(--line-height-tight)",
-              }}
-            >
-              No conflicts to resolve
-            </div>
-            <div
-              style={{
-                margin: "20px 0",
-                fontSize: "var(--font-text-size)",
-                color: "var(--text-muted)",
-                lineHeight: "var(--line-height-tight)",
-              }}
-            >
-              That's good, keep going
-            </div>
-          </div>
+          <NoConflicts />
         ) : (
-          files.map(renderConflict)
+          <>
+            <AcceptAllBar
+              fileCount={files.length}
+              onAcceptAll={acceptAllFiles}
+            />
+            {files.map(renderConflict)}
+          </>
         )}
       </div>
     </React.StrictMode>

@@ -65,23 +65,6 @@ const DiffView: React.FC<DiffViewProps> = ({
           />
         </div>
         <div style={{ minWidth: GUTTER_WIDTH, width: "auto" }}>
-          {diffs.length === 0 && (
-            <button
-              style={{
-                position: "absolute",
-                left: "50%",
-                top: "50%",
-                transform: "translate(-50%, -50%)",
-                zIndex: 1,
-                backgroundColor: "var(--interactive-accent)",
-                color: "var(--text-on-accent)",
-              }}
-              onClick={onConflictResolved}
-            >
-              Resolve conflict
-            </button>
-          )}
-
           <ActionsGutter
             diffChunks={diffs}
             lineHeight={lineHeight}
@@ -163,6 +146,28 @@ const DiffView: React.FC<DiffViewProps> = ({
             onScrollTopUpdate={setRightEditorTopOffset}
           />
         </div>
+      </div>
+      <div className="conflicts-file-actions">
+        {/* Both panes end up identical, so the file has no conflicts left */}
+        <button
+          disabled={diffs.length === 0}
+          onClick={() => onRemoteTextChange(localText)}
+        >
+          All local
+        </button>
+        <button
+          disabled={diffs.length === 0}
+          onClick={() => onLocalTextChange(remoteText)}
+        >
+          All remote
+        </button>
+        <button
+          className={diffs.length === 0 ? "mod-cta" : ""}
+          disabled={diffs.length > 0}
+          onClick={onConflictResolved}
+        >
+          Resolve conflict
+        </button>
       </div>
     </div>
   );

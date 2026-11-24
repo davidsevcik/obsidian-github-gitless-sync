@@ -2,13 +2,19 @@ import * as React from "react";
 import { ConflictFile, ConflictResolution } from "src/sync-manager";
 import DiffView from "./diff-view";
 import FilesTabBar from "./files-tab-bar";
+import AcceptAllBar from "../accept-all-bar";
+import { ConfirmAcceptAll } from "../confirm-accept-all";
+import NoConflicts from "../no-conflicts";
+import { Side, sideContent } from "../side";
 
 const SplitView = ({
   initialFiles,
   onResolveAllConflicts,
+  confirmAcceptAll,
 }: {
   initialFiles: ConflictFile[];
   onResolveAllConflicts: (resolutions: ConflictResolution[]) => void;
+  confirmAcceptAll: ConfirmAcceptAll;
 }) => {
   const [files, setFiles] = React.useState(initialFiles);
   const [resolvedConflicts, setResolvedConflicts] = React.useState<
@@ -42,6 +48,22 @@ const SplitView = ({
     }
   };
 
+  // The panes hold the edits made so far, so the remaining conflicts of a
+  // file keep a side by taking the whole pane of that side
+  const acceptAllFiles = async (side: Side) => {
+    if (!(await confirmAcceptAll(side, files.length))) {
+      return;
+    }
+    setFiles([]);
+    onResolveAllConflicts([
+      ...resolvedConflicts,
+      ...files.map((file) => ({
+        filePath: file.filePath,
+        content: sideContent(file, side),
+      })),
+    ]);
+  };
+
   return (
     <React.StrictMode>
       <div
@@ -53,36 +75,13 @@ const SplitView = ({
         }}
       >
         {files.length === 0 ? (
-          <div
-            style={{
-              position: "relative",
-              textAlign: "center",
-              alignSelf: "center",
-            }}
-          >
-            <div
-              style={{
-                margin: "20px 0",
-                fontWeight: "var(--h2-weight)",
-                fontSize: "var(--h2-size)",
-                lineHeight: "var(--line-height-tight)",
-              }}
-            >
-              No conflicts to resolve
-            </div>
-            <div
-              style={{
-                margin: "20px 0",
-                fontSize: "var(--font-text-size)",
-                color: "var(--text-muted)",
-                lineHeight: "var(--line-height-tight)",
-              }}
-            >
-              That's good, keep going
-            </div>
-          </div>
+          <NoConflicts />
         ) : (
           <>
+            <AcceptAllBar
+              fileCount={files.length}
+              onAcceptAll={acceptAllFiles}
+            />
             <FilesTabBar
               files={files.map((f) => f.filePath)}
               currentFile={currentFile?.filePath || ""}

@@ -8,11 +8,20 @@ import {
   createLineDecorations,
   createResolutionDecorations,
 } from "./decorations";
+import { acceptAll, conflictStarts } from "./accept-all";
+import { Side } from "../side";
 
 interface DiffViewProps {
   initialRemoteText: string;
   initialLocalText: string;
   onConflictResolved: (content: string) => void;
+}
+
+/// Lets the parent resolve the file without dispatching anything, used
+/// when all the files are resolved at once.
+export interface DiffViewHandle {
+  /// The content of the file once every conflict left keeps the given side
+  resolvedContent: (side: Side) => string;
 }
 
 /// Create a unique document that combines text from the remote
@@ -111,124 +120,144 @@ const createUnifiedDocument = (
   return { doc: result.join("\n"), lineRanges };
 };
 
-const DiffView: React.FC<DiffViewProps> = ({
-  initialRemoteText,
-  initialLocalText,
-  onConflictResolved,
-}) => {
-  const editorViewRef = React.useRef<EditorView | null>(null);
+const DiffView = React.forwardRef<DiffViewHandle, DiffViewProps>(
+  ({ initialRemoteText, initialLocalText, onConflictResolved }, ref) => {
+    const editorViewRef = React.useRef<EditorView | null>(null);
 
-  const diffChunks = diff(initialRemoteText, initialLocalText);
-  const { doc, lineRanges } = createUnifiedDocument(
-    initialRemoteText,
-    initialLocalText,
-    diffChunks,
-  );
+    const setup = React.useMemo(() => {
+      const diffChunks = diff(initialRemoteText, initialLocalText);
+      const { doc, lineRanges } = createUnifiedDocument(
+        initialRemoteText,
+        initialLocalText,
+        diffChunks,
+      );
+      return {
+        doc,
+        lineRanges,
+        rangesField: createRangesStateField(lineRanges),
+      };
+    }, [initialRemoteText, initialLocalText]);
+    const { doc, lineRanges, rangesField } = setup;
 
-  const [hasConflicts, setHasConflicts] = React.useState(diffChunks.length > 0);
+    const [conflictsLeft, setConflictsLeft] = React.useState(
+      () => conflictStarts(lineRanges).length,
+    );
 
-  const extensions = React.useMemo(() => {
-    const conflictRangesField = createRangesStateField(lineRanges);
-    return [
-      conflictRangesField,
-      createLineDecorations(conflictRangesField),
-      createResolutionDecorations(
-        conflictRangesField,
-
-        () => editorViewRef.current!,
-      ),
-      EditorView.updateListener.of((update) => {
-        if (update.docChanged) {
-          const conflictRanges = update.state.field(conflictRangesField);
-          const allConflictsSolved = conflictRanges.some(
-            (range) => range.source === "remote" || range.source === "local",
-          );
-
-          if (!allConflictsSolved) {
-            setHasConflicts(allConflictsSolved);
+    React.useImperativeHandle(
+      ref,
+      () => ({
+        resolvedContent: (side: Side) => {
+          const view = editorViewRef.current;
+          if (!view) {
+            return side === "local" ? initialLocalText : initialRemoteText;
           }
-        }
-      }),
-      EditorView.editable.of(true),
-      EditorView.theme({
-        "&": {
-          backgroundColor: "var(--background-primary)",
-          color: "var(--text-normal)",
-          borderTop: "1px solid var(--background-modifier-border)",
-          borderBottom: "1px solid var(--background-modifier-border)",
-        },
-        ".cm-content": {
-          padding: 0,
-          caretColor: "var(--caret-color)",
-          fontSize: "var(--font-text-size)",
-          fontFamily: "var(--font-text)",
-        },
-        "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
-          background: "var(--text-selection)",
-        },
-        "&.cm-focused": {
-          outline: 0,
-        },
-        "&.cm-focused .cm-cursor": {
-          borderLeftColor: "var(--text-normal)",
-        },
-        ".cm-addedLine": {
-          backgroundColor: "rgba(var(--color-green-rgb), 0.1)",
-        },
-        ".cm-deletedLine": {
-          backgroundColor: "rgba(var(--color-red-rgb), 0.1)",
+          const state = view.state;
+          return state
+            .update(acceptAll(state, rangesField, side))
+            .state.doc.toString();
         },
       }),
-    ];
-  }, [initialRemoteText, initialLocalText]);
+      [setup],
+    );
 
-  return (
-    <div
-      style={{
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-      }}
-    >
-      <CodeMirror
-        value={doc}
-        height="100%"
-        theme="none"
-        basicSetup={false}
-        extensions={extensions}
-        onCreateEditor={(view: EditorView) => {
-          editorViewRef.current = view;
-        }}
-      />
+    const acceptAllInEditor = (side: Side) => {
+      const view = editorViewRef.current!;
+      view.dispatch(acceptAll(view.state, rangesField, side));
+    };
+
+    const extensions = React.useMemo(() => {
+      return [
+        rangesField,
+        createLineDecorations(rangesField),
+        createResolutionDecorations(rangesField, () => editorViewRef.current!),
+        EditorView.updateListener.of((update) => {
+          const ranges = update.state.field(rangesField);
+          if (ranges !== update.startState.field(rangesField)) {
+            setConflictsLeft(conflictStarts(ranges).length);
+          }
+        }),
+        EditorView.editable.of(true),
+        EditorView.theme({
+          "&": {
+            backgroundColor: "var(--background-primary)",
+            color: "var(--text-normal)",
+            borderTop: "1px solid var(--background-modifier-border)",
+            borderBottom: "1px solid var(--background-modifier-border)",
+          },
+          ".cm-content": {
+            padding: 0,
+            caretColor: "var(--caret-color)",
+            fontSize: "var(--font-text-size)",
+            fontFamily: "var(--font-text)",
+          },
+          "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
+            background: "var(--text-selection)",
+          },
+          "&.cm-focused": {
+            outline: 0,
+          },
+          "&.cm-focused .cm-cursor": {
+            borderLeftColor: "var(--text-normal)",
+          },
+          ".cm-addedLine": {
+            backgroundColor: "rgba(var(--color-green-rgb), 0.1)",
+          },
+          ".cm-deletedLine": {
+            backgroundColor: "rgba(var(--color-red-rgb), 0.1)",
+          },
+        }),
+      ];
+    }, [setup]);
+
+    const hasConflicts = conflictsLeft > 0;
+
+    return (
       <div
         style={{
+          width: "100%",
+          height: "100%",
           display: "flex",
-          justifyContent: "center",
-          paddingTop: "var(--size-4-4)",
+          flexDirection: "column",
+          overflow: "hidden",
         }}
       >
-        <button
-          style={
-            hasConflicts
-              ? {}
-              : {
-                  backgroundColor: "var(--interactive-accent)",
-                  color: "var(--text-on-accent)",
-                }
-          }
-          disabled={hasConflicts}
-          onClick={() => {
-            const content = editorViewRef.current!.state.doc.toString();
-            onConflictResolved(content);
+        <CodeMirror
+          value={doc}
+          height="100%"
+          theme="none"
+          basicSetup={false}
+          extensions={extensions}
+          onCreateEditor={(view: EditorView) => {
+            editorViewRef.current = view;
           }}
-        >
-          Resolve conflict
-        </button>
+        />
+        <div className="conflicts-file-actions">
+          <button
+            disabled={!hasConflicts}
+            onClick={() => acceptAllInEditor("local")}
+          >
+            All local
+          </button>
+          <button
+            disabled={!hasConflicts}
+            onClick={() => acceptAllInEditor("remote")}
+          >
+            All remote
+          </button>
+          <button
+            className={hasConflicts ? "" : "mod-cta"}
+            disabled={hasConflicts}
+            onClick={() => {
+              const content = editorViewRef.current!.state.doc.toString();
+              onConflictResolved(content);
+            }}
+          >
+            Resolve conflict
+          </button>
+        </div>
       </div>
-    </div>
-  );
-};
+    );
+  },
+);
 
 export default DiffView;

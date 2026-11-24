@@ -4,6 +4,7 @@ import GitHubSyncPlugin from "src/main";
 import { ConflictFile, ConflictResolution } from "src/sync-manager";
 import SplitView from "./split-view/split-view";
 import UnifiedView from "./unified-view/unified-view";
+import { confirmAcceptAll } from "./confirm-accept-all";
 
 export const CONFLICTS_RESOLUTION_VIEW_TYPE = "conflicts-resolution-view";
 
@@ -73,6 +74,7 @@ export class ConflictsResolutionView extends ItemView {
         <SplitView
           initialFiles={conflicts}
           onResolveAllConflicts={this.resolveAllConflicts.bind(this)}
+          confirmAcceptAll={confirmAcceptAll(this.app)}
         />,
       );
     } else {
@@ -80,6 +82,7 @@ export class ConflictsResolutionView extends ItemView {
         <UnifiedView
           initialFiles={conflicts}
           onResolveAllConflicts={this.resolveAllConflicts.bind(this)}
+          confirmAcceptAll={confirmAcceptAll(this.app)}
         />,
       );
     }
