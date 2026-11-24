@@ -87,6 +87,7 @@ const SplitView = ({
             >
               {currentFile?.binary ? (
                 <BinaryConflict
+                  file={currentFile}
                   onKeep={(side) =>
                     resolveCurrentFile(keepSide(currentFile, side))
                   }

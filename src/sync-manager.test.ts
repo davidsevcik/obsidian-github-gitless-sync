@@ -188,12 +188,16 @@ describe("loadConflictFile", () => {
       { "image.png": png },
       { "remote-sha": png.slice(0, 9) },
     );
-    expect(await manager.loadConflictFile("image.png", "remote-sha")).toEqual({
+    const file = await manager.loadConflictFile("image.png", "remote-sha");
+    expect(file).toMatchObject({
       filePath: "image.png",
       remoteContent: "",
       localContent: "",
       binary: true,
     });
+    // Kept to preview them
+    expect(new Uint8Array(file.remoteBytes!)).toEqual(png.slice(0, 9));
+    expect(new Uint8Array(file.localBytes!)).toEqual(png);
   });
 
   it("can't merge a file that is binary on one side only", async () => {
