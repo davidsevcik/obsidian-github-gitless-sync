@@ -1005,18 +1005,10 @@ export default class SyncManager {
       actions.map(async (action) => {
         switch (action.type) {
           case "upload": {
-            const normalizedPath = normalizePath(action.filePath);
-            const resolution = conflictResolutions.find(
-              (c: ConflictResolution) => c.filePath === action.filePath,
+            const content = await this.uploadContent(
+              action.filePath,
+              conflictResolutions,
             );
-            // If the file was conflicting we need to read the content from the
-            // conflict resolution instead of reading it from file since at this point
-            // we still have not updated the local file.
-            // An empty resolution is still a resolution
-            const content =
-              resolution !== undefined
-                ? resolution.content
-                : await this.vault.adapter.read(normalizedPath);
             newTreeFiles[action.filePath] = {
               path: action.filePath,
               mode: "100644",
@@ -1346,6 +1338,23 @@ export default class SyncManager {
    * @param filePath normalized path to file
    * @returns String containing the file SHA1 or null in case the file doesn't exist
    */
+  /// The content to upload for a file. If the file was conflicting it comes
+  /// from the conflict resolution instead of the file, since at this point we
+  /// still have not updated the local file. An empty resolution is still a
+  /// resolution.
+  async uploadContent(
+    filePath: string,
+    conflictResolutions: ConflictResolution[],
+  ): Promise<string> {
+    const resolution = conflictResolutions.find(
+      (c: ConflictResolution) => c.filePath === filePath,
+    );
+    if (resolution !== undefined) {
+      return resolution.content;
+    }
+    return await this.vault.adapter.read(normalizePath(filePath));
+  }
+
   async calculateSHA(filePath: string): Promise<string | null> {
     return await calculateFileSHA(this.vault, filePath);
   }
