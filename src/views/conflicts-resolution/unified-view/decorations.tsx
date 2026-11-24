@@ -11,10 +11,8 @@ import UnifiedResolutionBar from "./unified-resolution-bar";
 import { UpdateRangesEffect } from "./ranges-state-field";
 
 interface ResolutionWidgetProps {
-  onAccept?: () => void;
-  onDiscard?: () => void;
-  onAcceptAbove?: () => void;
-  onAcceptBelow?: () => void;
+  onAcceptRemote: () => void;
+  onAcceptLocal: () => void;
   onAcceptBoth?: () => void;
   onDiscardBoth?: () => void;
 }
@@ -23,42 +21,17 @@ interface ResolutionWidgetProps {
 /// This is usually drawn between two conflicting ranges in the document, if
 /// the conflict comes only from a single document this will be shown on top.
 ///
-/// If onAccept and onDiscard are set only the accept and discard buttons will be shown,
-/// this is used when the conflict comes from a single document.
-/// If either is not set all the other buttons will be shown.
+/// If the conflict comes from a single document accepting the other one
+/// discards its lines, and the accept both and discard both buttons are not set.
 class ResolutionWidget extends WidgetType {
-  onAccept?: () => void;
-  onDiscard?: () => void;
-  onAcceptAbove?: () => void;
-  onAcceptBelow?: () => void;
-  onAcceptBoth?: () => void;
-  onDiscardBoth?: () => void;
-
-  constructor(props: ResolutionWidgetProps) {
+  constructor(private props: ResolutionWidgetProps) {
     super();
-    ({
-      onAccept: this.onAccept,
-      onDiscard: this.onDiscard,
-      onAcceptAbove: this.onAcceptAbove,
-      onAcceptBelow: this.onAcceptBelow,
-      onAcceptBoth: this.onAcceptBoth,
-      onDiscardBoth: this.onDiscardBoth,
-    } = props);
   }
 
   toDOM(): HTMLElement {
     const div = document.createElement("div");
     const root = createRoot(div);
-    root.render(
-      <UnifiedResolutionBar
-        onAccept={this.onAccept}
-        onDiscard={this.onDiscard}
-        onAcceptAbove={this.onAcceptAbove}
-        onAcceptBelow={this.onAcceptBelow}
-        onAcceptBoth={this.onAcceptBoth}
-        onDiscardBoth={this.onDiscardBoth}
-      />,
-    );
+    root.render(<UnifiedResolutionBar {...this.props} />);
     return div;
   }
 }
@@ -111,6 +84,44 @@ export const createResolutionDecorations = (
       const ranges = state.field(rangesStateField);
       let widgets: Range<Decoration>[] = [];
 
+      // The widget of a range that comes from a single document, accepting
+      // its side keeps the lines and accepting the other side deletes them.
+      const oneSidedWidget = (
+        range: ConflictRange,
+        index: number,
+        nextRange: ConflictRange | undefined,
+      ) => {
+        const keep = () => {
+          getView().dispatch({
+            effects: UpdateRangesEffect.of({
+              index: index,
+              newSource: "both",
+            }),
+          });
+        };
+        const discard = () => {
+          getView().dispatch({
+            changes: {
+              from: Math.max(range.from - 1, 0),
+              to: nextRange?.from || range.to,
+              insert: "",
+            },
+            effects: UpdateRangesEffect.of({
+              index: index,
+            }),
+          });
+        };
+        const fromRemote = range.source === "remote";
+        return Decoration.widget({
+          widget: new ResolutionWidget({
+            onAcceptRemote: fromRemote ? keep : discard,
+            onAcceptLocal: fromRemote ? discard : keep,
+          }),
+          side: -1,
+          block: true,
+        }).range(range.from);
+      };
+
       ranges.forEach((range: ConflictRange, index: number) => {
         if (range.source === "both") {
           return;
@@ -123,7 +134,7 @@ export const createResolutionDecorations = (
           if (nextRangeIsNew) {
             const deco = Decoration.widget({
               widget: new ResolutionWidget({
-                onAcceptAbove: () => {
+                onAcceptRemote: () => {
                   getView().dispatch({
                     changes: {
                       from: range.to,
@@ -141,7 +152,7 @@ export const createResolutionDecorations = (
                     ],
                   });
                 },
-                onAcceptBelow: () => {
+                onAcceptLocal: () => {
                   getView().dispatch({
                     changes: {
                       from: range.from,
@@ -196,33 +207,7 @@ export const createResolutionDecorations = (
             });
             widgets.push(deco.range(range.to));
           } else {
-            const deco = Decoration.widget({
-              widget: new ResolutionWidget({
-                onAccept: () => {
-                  getView().dispatch({
-                    effects: UpdateRangesEffect.of({
-                      index: index,
-                      newSource: "both",
-                    }),
-                  });
-                },
-                onDiscard: () => {
-                  getView().dispatch({
-                    changes: {
-                      from: Math.max(range.from - 1, 0),
-                      to: nextRange?.from || range.to,
-                      insert: "",
-                    },
-                    effects: UpdateRangesEffect.of({
-                      index: index,
-                    }),
-                  });
-                },
-              }),
-              side: -1,
-              block: true,
-            });
-            widgets.push(deco.range(range.from));
+            widgets.push(oneSidedWidget(range, index, nextRange));
           }
         } else if (
           range.source === "local" &&
@@ -230,33 +215,7 @@ export const createResolutionDecorations = (
         ) {
           // We draw this only in case the previous range doesn't come from the old document
           // since we handle that above
-          const deco = Decoration.widget({
-            widget: new ResolutionWidget({
-              onAccept: () => {
-                getView().dispatch({
-                  effects: UpdateRangesEffect.of({
-                    index: index,
-                    newSource: "both",
-                  }),
-                });
-              },
-              onDiscard: () => {
-                getView().dispatch({
-                  changes: {
-                    from: Math.max(range.from - 1, 0),
-                    to: nextRange?.from || range.to,
-                    insert: "",
-                  },
-                  effects: UpdateRangesEffect.of({
-                    index: index,
-                  }),
-                });
-              },
-            }),
-            side: -1,
-            block: true,
-          });
-          widgets.push(deco.range(range.from));
+          widgets.push(oneSidedWidget(range, index, nextRange));
         }
       });
 

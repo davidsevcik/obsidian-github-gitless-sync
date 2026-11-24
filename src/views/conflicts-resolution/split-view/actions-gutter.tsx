@@ -70,11 +70,11 @@ const ActionsGutter: React.FC<ActionsGutterProps> = ({
         >
           <div style={{ display: "flex", flexDirection: "row" }}>
             <ButtonCross
-              tooltipText="Delete lines"
+              tooltipText="Use remote lines"
               onClick={() => onReject(chunk)}
             />
             <ButtonLeftArrow
-              tooltipText="Add lines"
+              tooltipText="Use local lines"
               onClick={() => onAcceptLeft(chunk)}
             />
           </div>
@@ -90,11 +90,11 @@ const ActionsGutter: React.FC<ActionsGutterProps> = ({
         >
           <div style={{ display: "flex", flexDirection: "row" }}>
             <ButtonRightArrow
-              tooltipText="Add lines"
+              tooltipText="Use remote lines"
               onClick={() => onAcceptRight(chunk)}
             />
             <ButtonCross
-              tooltipText="Delete lines"
+              tooltipText="Use local lines"
               onClick={() => onReject(chunk)}
             />
           </div>
@@ -120,7 +120,7 @@ const ActionsGutter: React.FC<ActionsGutterProps> = ({
               }}
             >
               <ButtonRightArrow
-                tooltipText="Overwrite right lines"
+                tooltipText="Use remote lines"
                 onClick={() => onAcceptRight(chunk)}
               />
             </div>
@@ -133,7 +133,7 @@ const ActionsGutter: React.FC<ActionsGutterProps> = ({
               }}
             >
               <ButtonLeftArrow
-                tooltipText="Overwrite left lines"
+                tooltipText="Use local lines"
                 onClick={() => onAcceptLeft(chunk)}
               />
             </div>

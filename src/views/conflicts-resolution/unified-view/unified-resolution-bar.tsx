@@ -1,43 +1,38 @@
 import * as React from "react";
 
 interface UnifiedResolutionBarProps {
-  onAccept?: () => void;
-  onDiscard?: () => void;
-  onAcceptAbove?: () => void;
-  onAcceptBelow?: () => void;
+  onAcceptRemote: () => void;
+  onAcceptLocal: () => void;
+  /// Only set when the conflict has lines from both documents
   onAcceptBoth?: () => void;
   onDiscardBoth?: () => void;
 }
 
 /// Component that shows buttons the user can click to resolve conflicts
 const UnifiedResolutionBar: React.FC<UnifiedResolutionBarProps> = ({
-  onAccept,
-  onDiscard,
-  onAcceptAbove,
-  onAcceptBelow,
+  onAcceptRemote,
+  onAcceptLocal,
   onAcceptBoth,
   onDiscardBoth,
 }) => {
   const renderActions = () => {
-    if (onAccept !== undefined && onDiscard !== undefined) {
-      return (
-        <>
-          <ClickableText text="Accept" onClick={() => onAccept?.()} />
-          {" | "}
-          <ClickableText text="Discard" onClick={() => onDiscard?.()} />
-        </>
-      );
-    }
-
     return (
       <>
-        <ClickableText text="Accept above" onClick={() => onAcceptAbove?.()} />
+        <ClickableText text="Accept remote" onClick={onAcceptRemote} />
         {" | "}
-        <ClickableText text="Accept below" onClick={() => onAcceptBelow?.()} />
-        {" | "}
-        <ClickableText text="Accept both" onClick={() => onAcceptBoth?.()} />
-        {" | "}
-        <ClickableText text="Discard both" onClick={() => onDiscardBoth?.()} />
+        <ClickableText text="Accept local" onClick={onAcceptLocal} />
+        {onAcceptBoth && (
+          <>
+            {" | "}
+            <ClickableText text="Accept both" onClick={onAcceptBoth} />
+          </>
+        )}
+        {onDiscardBoth && (
+          <>
+            {" | "}
+            <ClickableText text="Discard both" onClick={onDiscardBoth} />
+          </>
+        )}
       </>
     );
   };
