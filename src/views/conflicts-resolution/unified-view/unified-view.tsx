@@ -1,7 +1,8 @@
 import * as React from "react";
 import { Menu } from "obsidian";
 import { ConflictFile, ConflictResolution } from "src/sync-manager";
-import DiffView, { DiffViewHandle, countConflicts } from "./diff-view";
+import DiffView, { DiffViewHandle } from "./diff-view";
+import { countConflicts } from "./unified-document";
 import { Side, pluralize, sideContent } from "../side";
 import IconButton from "../icon-button";
 import AcceptAllBar from "../accept-all-bar";
