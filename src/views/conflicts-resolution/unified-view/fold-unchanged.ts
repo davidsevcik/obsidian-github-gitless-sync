@@ -73,7 +73,12 @@ const createFolds = (
     builder.add(
       state.doc.line(startLine).from,
       state.doc.line(endLine).to,
-      Decoration.replace({ widget: new FoldWidget(lines), block: true }),
+      Decoration.replace({
+        widget: new FoldWidget(lines),
+        block: true,
+        // Text inserted at its edges is not part of it
+        inclusive: false,
+      }),
     );
   });
   return builder.finish();
@@ -85,6 +90,13 @@ export const createFoldUnchanged = (initialRanges: ConflictRange[]) =>
   StateField.define<DecorationSet>({
     create: (state) => createFolds(state, initialRanges),
     update: (folds, tr) => {
+      if (tr.docChanged) {
+        // A fold must hide only unchanged lines, unfold it if an edit
+        // touches it
+        folds = folds.update({
+          filter: (from, to) => !tr.changes.touchesRange(from, to),
+        });
+      }
       folds = folds.map(tr.changes);
       for (const effect of tr.effects) {
         if (effect.is(UnfoldEffect)) {

@@ -11,6 +11,9 @@ export const CONFLICTS_RESOLUTION_VIEW_TYPE = "conflicts-resolution-view";
 export class ConflictsResolutionView extends ItemView {
   icon: IconName = "merge";
   private root: Root | null = null;
+  // Changes with every new set of conflicts. The views keep the files left to
+  // resolve in their state, so they must be created anew for a new set.
+  private conflictsKey = 0;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -36,6 +39,10 @@ export class ConflictsResolutionView extends ItemView {
   }
 
   setConflictFiles(conflicts: ConflictFile[]) {
+    // Reopening the view shows the same set again, keeping the progress
+    if (conflicts !== this.conflicts) {
+      this.conflictsKey++;
+    }
     this.conflicts = conflicts;
     this.render(conflicts);
   }
@@ -72,6 +79,7 @@ export class ConflictsResolutionView extends ItemView {
     if (diffMode === "split") {
       this.root.render(
         <SplitView
+          key={this.conflictsKey}
           initialFiles={conflicts}
           onResolveAllConflicts={this.resolveAllConflicts.bind(this)}
           confirmAcceptAll={confirmAcceptAll(this.app)}
@@ -80,6 +88,7 @@ export class ConflictsResolutionView extends ItemView {
     } else {
       this.root.render(
         <UnifiedView
+          key={this.conflictsKey}
           initialFiles={conflicts}
           onResolveAllConflicts={this.resolveAllConflicts.bind(this)}
           confirmAcceptAll={confirmAcceptAll(this.app)}
