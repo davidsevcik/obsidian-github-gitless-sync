@@ -120,7 +120,8 @@ export const createResolutionDecorations = (
         if (range.source === "both") {
           return;
         }
-        const previousRange = ranges.at(index - 1);
+        // at(-1) would be the last range
+        const previousRange = index > 0 ? ranges[index - 1] : undefined;
         const nextRange = ranges.at(index + 1);
 
         if (range.source === "remote") {

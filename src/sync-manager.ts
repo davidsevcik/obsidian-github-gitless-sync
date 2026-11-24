@@ -1012,9 +1012,11 @@ export default class SyncManager {
             // If the file was conflicting we need to read the content from the
             // conflict resolution instead of reading it from file since at this point
             // we still have not updated the local file.
+            // An empty resolution is still a resolution
             const content =
-              resolution?.content ||
-              (await this.vault.adapter.read(normalizedPath));
+              resolution !== undefined
+                ? resolution.content
+                : await this.vault.adapter.read(normalizedPath);
             newTreeFiles[action.filePath] = {
               path: action.filePath,
               mode: "100644",
@@ -1419,30 +1421,38 @@ export default class SyncManager {
     const uploadedBlobs = new Set<string>();
     await Promise.all(
       Object.keys(treeFiles)
-        .filter((filePath: string) => treeFiles[filePath].content)
+        .filter(
+          (filePath: string) =>
+            treeFiles[filePath].content ||
+            conflictResolutions.some((c) => c.filePath === filePath),
+        )
         .map(async (filePath: string) => {
+          // The content of a conflict resolution is written to the local
+          // file only after the sync is done, so what we upload and its SHA
+          // must come from the resolution, not from the file.
+          const resolution = conflictResolutions.find(
+            (c: ConflictResolution) => c.filePath === filePath,
+          );
           // I don't fully trust file extensions as they're not completely reliable
           // to determine the file type, though I feel it's ok to compromise and rely
           // on them if it makes the plugin handle upload better on certain devices.
           if (hasTextExtension(filePath)) {
-            const resolution = conflictResolutions.find(
-              (c: ConflictResolution) => c.filePath === filePath,
-            );
-            // The content of a conflict resolution is written to the local
-            // file only after the sync is done, so the SHA must be the one
-            // of the content we upload, not of the file.
-            newSHAs[filePath] = resolution?.content
-              ? await calculateBlobSHA(
-                  new TextEncoder().encode(resolution.content),
-                )
-              : await this.calculateSHA(filePath);
+            newSHAs[filePath] =
+              resolution !== undefined
+                ? await calculateBlobSHA(
+                    new TextEncoder().encode(resolution.content),
+                  )
+                : await this.calculateSHA(filePath);
             return;
           }
 
           // We can't upload binary files by setting the content of a tree item,
           // we first need to create a Git blob by uploading the file, then
           // we must update the tree item to point the SHA to the blob we just created.
-          const buffer = await this.vault.adapter.readBinary(filePath);
+          const buffer =
+            resolution !== undefined
+              ? new TextEncoder().encode(resolution.content).buffer
+              : await this.vault.adapter.readBinary(filePath);
           const { sha } = await this.client.createBlob({
             content: arrayBufferToBase64(buffer),
             retry: true,

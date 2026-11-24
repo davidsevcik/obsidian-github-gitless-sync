@@ -1,5 +1,5 @@
 import * as React from "react";
-import CodeMirror from "@uiw/react-codemirror";
+import CodeMirror, { Text } from "@uiw/react-codemirror";
 import { EditorView } from "@codemirror/view";
 
 import diff, { DiffChunk } from "../diff";
@@ -123,6 +123,13 @@ const createUnifiedDocument = (
   return { doc: result.join("\n"), lineRanges };
 };
 
+/// The editor splits lines on any line break, the content we save keeps
+/// the line breaks of the original text.
+const withLineBreaks = (doc: Text, original: string) => {
+  const text = doc.toString();
+  return original.includes("\r\n") ? text.replace(/\n/g, "\r\n") : text;
+};
+
 /// How many conflicts the unified document of the two versions has, the
 /// same count the editor shows
 export const countConflicts = (remoteText: string, localText: string) =>
@@ -169,14 +176,17 @@ const DiffView = React.forwardRef<DiffViewHandle, DiffViewProps>(
       ref,
       () => ({
         resolvedContent: (side: Side) => {
+          const sideText =
+            side === "local" ? initialLocalText : initialRemoteText;
           const view = editorViewRef.current;
           if (!view) {
-            return side === "local" ? initialLocalText : initialRemoteText;
+            return sideText;
           }
           const state = view.state;
-          return state
-            .update(acceptAll(state, rangesField, side))
-            .state.doc.toString();
+          return withLineBreaks(
+            state.update(acceptAll(state, rangesField, side)).state.doc,
+            sideText,
+          );
         },
       }),
       [setup],
@@ -310,7 +320,11 @@ const DiffView = React.forwardRef<DiffViewHandle, DiffViewProps>(
             className={hasConflicts ? "" : "mod-cta"}
             disabled={hasConflicts}
             onClick={() => {
-              const content = editorViewRef.current!.state.doc.toString();
+              // The local file is the one we're writing
+              const content = withLineBreaks(
+                editorViewRef.current!.state.doc,
+                initialLocalText,
+              );
               onConflictResolved(content);
             }}
           >

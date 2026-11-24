@@ -43,6 +43,11 @@ export const createRangesStateField = (
         return ranges;
       }
 
+      // Our own changes always come with effects, so changes without them
+      // are the user editing the document. A conflict the user edited is
+      // resolved by hand, nothing must replace it later.
+      const userEdit = rangeEffects.size === 0;
+
       // Map all positions through the changes and apply any effect
       let newRanges = ranges
         .map((range, index) => {
@@ -50,6 +55,11 @@ export const createRangesStateField = (
           const effect = rangeEffects.get(index) as RangeChangeSourceOperation;
           if (effect) {
             source = effect.newSource;
+          } else if (
+            userEdit &&
+            tr.changes.touchesRange(range.from, range.to)
+          ) {
+            source = "both";
           }
           return {
             from: tr.changes.mapPos(range.from),
