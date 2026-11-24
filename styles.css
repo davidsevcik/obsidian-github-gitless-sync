@@ -172,3 +172,10 @@
     font-weight: var(--font-semibold);
     color: var(--text-muted);
 }
+
+.conflicts-binary {
+    flex: 1;
+    padding: var(--size-4-4);
+    text-align: center;
+    color: var(--text-muted);
+}

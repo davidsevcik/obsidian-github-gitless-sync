@@ -1,11 +1,12 @@
 import * as React from "react";
-import { ConflictFile, ConflictResolution } from "src/sync-manager";
+import { ConflictChoice, ConflictFile } from "src/sync-manager";
 import DiffView from "./diff-view";
 import FilesTabBar from "./files-tab-bar";
 import AcceptAllBar from "../accept-all-bar";
 import { ConfirmAcceptAll } from "../confirm-accept-all";
 import NoConflicts from "../no-conflicts";
-import { Side, sideContent } from "../side";
+import { Side, keepSide } from "../side";
+import BinaryConflict from "../binary-conflict";
 
 const SplitView = ({
   initialFiles,
@@ -13,30 +14,24 @@ const SplitView = ({
   confirmAcceptAll,
 }: {
   initialFiles: ConflictFile[];
-  onResolveAllConflicts: (resolutions: ConflictResolution[]) => void;
+  onResolveAllConflicts: (resolutions: ConflictChoice[]) => void;
   confirmAcceptAll: ConfirmAcceptAll;
 }) => {
   const [files, setFiles] = React.useState(initialFiles);
   const [resolvedConflicts, setResolvedConflicts] = React.useState<
-    ConflictResolution[]
+    ConflictChoice[]
   >([]);
   const [currentFileIndex, setCurrentFileIndex] = React.useState(0);
   const currentFile = files.at(currentFileIndex);
 
-  const onConflictResolved = () => {
+  const resolveCurrentFile = (choice: ConflictChoice) => {
     // Remove the file from the conflicts to resolve
     const remainingFiles = files.filter(
       (_, index) => index !== currentFileIndex,
     );
     setFiles(remainingFiles);
     // Keep track of the resolved conflicts
-    const newResolvedConflicts = [
-      ...resolvedConflicts,
-      {
-        filePath: currentFile!.filePath,
-        content: currentFile!.localContent,
-      },
-    ];
+    const newResolvedConflicts = [...resolvedConflicts, choice];
     setResolvedConflicts(newResolvedConflicts);
     // Select the previous file only if we're not already at the start
     if (currentFileIndex > 0) {
@@ -57,10 +52,7 @@ const SplitView = ({
     setFiles([]);
     onResolveAllConflicts([
       ...resolvedConflicts,
-      ...files.map((file) => ({
-        filePath: file.filePath,
-        content: sideContent(file, side),
-      })),
+      ...files.map((file) => keepSide(file, side)),
     ]);
   };
 
@@ -93,21 +85,35 @@ const SplitView = ({
                 flex: 1,
               }}
             >
-              <DiffView
-                remoteText={currentFile?.remoteContent || ""}
-                localText={currentFile?.localContent || ""}
-                onRemoteTextChange={(content: string) => {
-                  const tempFiles = [...files];
-                  tempFiles[currentFileIndex].remoteContent = content;
-                  setFiles(tempFiles);
-                }}
-                onLocalTextChange={(content: string) => {
-                  const tempFiles = [...files];
-                  tempFiles[currentFileIndex].localContent = content;
-                  setFiles(tempFiles);
-                }}
-                onConflictResolved={onConflictResolved}
-              />
+              {currentFile?.binary ? (
+                <BinaryConflict
+                  onKeep={(side) =>
+                    resolveCurrentFile(keepSide(currentFile, side))
+                  }
+                />
+              ) : (
+                <DiffView
+                  remoteText={currentFile?.remoteContent || ""}
+                  localText={currentFile?.localContent || ""}
+                  onRemoteTextChange={(content: string) => {
+                    const tempFiles = [...files];
+                    tempFiles[currentFileIndex].remoteContent = content;
+                    setFiles(tempFiles);
+                  }}
+                  onLocalTextChange={(content: string) => {
+                    const tempFiles = [...files];
+                    tempFiles[currentFileIndex].localContent = content;
+                    setFiles(tempFiles);
+                  }}
+                  onConflictResolved={() =>
+                    // The local pane is the merged content
+                    resolveCurrentFile({
+                      filePath: currentFile!.filePath,
+                      content: currentFile!.localContent,
+                    })
+                  }
+                />
+              )}
             </div>
           </>
         )}

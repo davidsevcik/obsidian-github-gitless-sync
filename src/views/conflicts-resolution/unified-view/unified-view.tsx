@@ -1,9 +1,10 @@
 import * as React from "react";
 import { Menu } from "obsidian";
-import { ConflictFile, ConflictResolution } from "src/sync-manager";
+import { ConflictChoice, ConflictFile } from "src/sync-manager";
 import DiffView, { DiffViewHandle } from "./diff-view";
 import { countConflicts } from "./unified-document";
-import { Side, pluralize, sideContent } from "../side";
+import { Side, keepSide, pluralize } from "../side";
+import BinaryConflict from "../binary-conflict";
 import IconButton from "../icon-button";
 import AcceptAllBar from "../accept-all-bar";
 import { ConfirmAcceptAll } from "../confirm-accept-all";
@@ -18,12 +19,12 @@ const UnifiedView = ({
   confirmAcceptAll,
 }: {
   initialFiles: ConflictFile[];
-  onResolveAllConflicts: (resolutions: ConflictResolution[]) => void;
+  onResolveAllConflicts: (resolutions: ConflictChoice[]) => void;
   confirmAcceptAll: ConfirmAcceptAll;
 }) => {
   const [files, setFiles] = React.useState(initialFiles);
   const [resolvedConflicts, setResolvedConflicts] = React.useState<
-    ConflictResolution[]
+    ConflictChoice[]
   >([]);
   const [openFilePath, setOpenFilePath] = React.useState<string | null>(null);
   const [openedFilePaths, setOpenedFilePaths] = React.useState<string[]>([]);
@@ -39,7 +40,7 @@ const UnifiedView = ({
   );
   const diffViews = React.useRef(new Map<string, DiffViewHandle>());
 
-  const resolveFiles = (resolutions: ConflictResolution[]) => {
+  const resolveFiles = (resolutions: ConflictChoice[]) => {
     const resolvedPaths = new Set(resolutions.map((r) => r.filePath));
     const remainingFiles = files.filter(
       (file) => !resolvedPaths.has(file.filePath),
@@ -77,32 +78,28 @@ const UnifiedView = ({
     setOpenFilePath(filePath);
   };
 
-  /// The content of the file once every conflict left in it keeps the
-  /// given side, the conflicts already resolved in the editor are kept.
-  const resolvedContent = (file: ConflictFile, side: Side) => {
+  /// Every conflict left in the file keeps the given side, the conflicts
+  /// already resolved in the editor are kept.
+  const acceptSide = (file: ConflictFile, side: Side): ConflictChoice => {
     const diffView = diffViews.current.get(file.filePath);
     if (diffView) {
-      return diffView.resolvedContent(side);
+      return {
+        filePath: file.filePath,
+        content: diffView.resolvedContent(side),
+      };
     }
-    return sideContent(file, side);
+    return keepSide(file, side);
   };
 
   const acceptFile = (file: ConflictFile, side: Side) => {
-    resolveFiles([
-      { filePath: file.filePath, content: resolvedContent(file, side) },
-    ]);
+    resolveFiles([acceptSide(file, side)]);
   };
 
   const acceptAllFiles = async (side: Side) => {
     if (!(await confirmAcceptAll(side, files.length))) {
       return;
     }
-    resolveFiles(
-      files.map((file) => ({
-        filePath: file.filePath,
-        content: resolvedContent(file, side),
-      })),
-    );
+    resolveFiles(files.map((file) => acceptSide(file, side)));
   };
 
   if (files.length === 0) {
@@ -128,6 +125,7 @@ const UnifiedView = ({
               <FileRow
                 key={file.filePath}
                 filePath={file.filePath}
+                binary={file.binary}
                 conflictsLeft={conflictsLeft[file.filePath] ?? 0}
                 onOpen={() => openFile(file.filePath)}
                 onAccept={(side) => acceptFile(file, side)}
@@ -153,26 +151,30 @@ const UnifiedView = ({
                   onNext={() => openFile(files[index + 1].filePath)}
                 />
                 <FilePath filePath={file.filePath} />
-                <DiffView
-                  ref={(handle) => {
-                    if (handle) {
-                      diffViews.current.set(file.filePath, handle);
-                    } else {
-                      diffViews.current.delete(file.filePath);
+                {file.binary ? (
+                  <BinaryConflict onKeep={(side) => acceptFile(file, side)} />
+                ) : (
+                  <DiffView
+                    ref={(handle) => {
+                      if (handle) {
+                        diffViews.current.set(file.filePath, handle);
+                      } else {
+                        diffViews.current.delete(file.filePath);
+                      }
+                    }}
+                    initialRemoteText={file.remoteContent || ""}
+                    initialLocalText={file.localContent || ""}
+                    onConflictsLeftChange={(conflicts) =>
+                      setConflictsLeft((counts) => ({
+                        ...counts,
+                        [file.filePath]: conflicts,
+                      }))
                     }
-                  }}
-                  initialRemoteText={file.remoteContent || ""}
-                  initialLocalText={file.localContent || ""}
-                  onConflictsLeftChange={(conflicts) =>
-                    setConflictsLeft((counts) => ({
-                      ...counts,
-                      [file.filePath]: conflicts,
-                    }))
-                  }
-                  onConflictResolved={(content: string) => {
-                    resolveFiles([{ filePath: file.filePath, content }]);
-                  }}
-                />
+                    onConflictResolved={(content: string) => {
+                      resolveFiles([{ filePath: file.filePath, content }]);
+                    }}
+                  />
+                )}
               </div>
             );
           })}
@@ -201,6 +203,7 @@ const FilePath: React.FC<{ filePath: string }> = ({ filePath }) => {
 
 interface FileRowProps {
   filePath: string;
+  binary: boolean;
   conflictsLeft: number;
   onOpen: () => void;
   onAccept: (side: Side) => void;
@@ -208,6 +211,7 @@ interface FileRowProps {
 
 const FileRow: React.FC<FileRowProps> = ({
   filePath,
+  binary,
   conflictsLeft,
   onOpen,
   onAccept,
@@ -230,7 +234,7 @@ const FileRow: React.FC<FileRowProps> = ({
     <div className="conflicts-file-row tappable" onClick={onOpen}>
       <FilePath filePath={filePath} />
       <div className="conflicts-file-count">
-        {pluralize(conflictsLeft, "conflict")}
+        {binary ? "Binary file" : pluralize(conflictsLeft, "conflict")}
       </div>
       <IconButton
         icon="more-horizontal"

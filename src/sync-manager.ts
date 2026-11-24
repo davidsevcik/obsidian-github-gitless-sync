@@ -28,6 +28,7 @@ import {
   calculateBlobSHA,
   calculateFileSHA,
   decodeBase64String,
+  decodeText,
   hasTextExtension,
 } from "./utils";
 import GitHubSyncPlugin from "./main";
@@ -53,16 +54,54 @@ export interface ConflictFile {
   filePath: string;
   remoteContent: string;
   localContent: string;
+  // One of the versions is not text, so they can't be merged and the
+  // contents are empty: the user keeps one version whole
+  binary: boolean;
 }
 
+/// The merged content of a text file
 export interface ConflictResolution {
   filePath: string;
   content: string;
 }
 
+/// The version kept whole of a binary file
+export interface KeepVersion {
+  filePath: string;
+  keep: "local" | "remote";
+}
+
+export type ConflictChoice = ConflictResolution | KeepVersion;
+
 type OnConflictsCallback = (
   conflicts: ConflictFile[],
-) => Promise<ConflictResolution[]>;
+) => Promise<ConflictChoice[]>;
+
+/**
+ * The sync actions that apply the choices of the user for the conflicts.
+ * A merged file is uploaded, and its content written locally only after
+ * the sync is committed. A version kept whole replaces the other one as
+ * the overwrite settings do, by downloading or uploading the file as it is.
+ */
+export function conflictActionsFor(choices: ConflictChoice[]): {
+  actions: SyncAction[];
+  resolutions: ConflictResolution[];
+} {
+  const actions: SyncAction[] = [];
+  const resolutions: ConflictResolution[] = [];
+  for (const choice of choices) {
+    if ("keep" in choice) {
+      actions.push({
+        type: choice.keep === "remote" ? "download" : "upload",
+        filePath: choice.filePath,
+      });
+    } else {
+      resolutions.push(choice);
+      actions.push({ type: "upload", filePath: choice.filePath });
+    }
+  }
+  return { actions, resolutions };
+}
 
 export default class SyncManager {
   private metadataStore: MetadataStore;
@@ -904,12 +943,9 @@ export default class SyncManager {
       await this.logger.warn("Found conflicts", conflicts);
       if (this.settings.conflictHandling === "ask") {
         // Here we block the sync process until the user has resolved all the conflicts
-        conflictResolutions = await this.onConflicts(conflicts);
-        conflictActions = conflictResolutions.map(
-          (resolution: ConflictResolution) => {
-            return { type: "upload", filePath: resolution.filePath };
-          },
-        );
+        const choices = await this.onConflicts(conflicts);
+        ({ actions: conflictActions, resolutions: conflictResolutions } =
+          conflictActionsFor(choices));
       } else if (this.settings.conflictHandling === "overwriteLocal") {
         // The user explicitly wants to always overwrite the local file
         // in case of conflicts so we just download the remote file to solve it
@@ -1135,26 +1171,39 @@ export default class SyncManager {
     return await Promise.all(
       conflicts
         .filter((filePath): filePath is string => filePath !== null)
-        .map(async (filePath: string) => {
-          // Load contents in parallel
-          const [remoteContent, localContent] = await Promise.all([
-            await (async () => {
-              const res = await this.client.getBlob({
-                sha: filesMetadata[filePath].sha!,
-                retry: true,
-                maxRetries: 1,
-              });
-              return decodeBase64String(res.content);
-            })(),
-            await this.vault.adapter.read(normalizePath(filePath)),
-          ]);
-          return {
-            filePath,
-            remoteContent,
-            localContent,
-          };
-        }),
+        .map((filePath: string) =>
+          this.loadConflictFile(filePath, filesMetadata[filePath].sha!),
+        ),
     );
+  }
+
+  /**
+   * Loads both versions of a conflicting file. They're compared as text
+   * only if both are text, whatever the extension of the file: a canvas or
+   * an SVG can be merged, an image can't.
+   */
+  async loadConflictFile(
+    filePath: string,
+    remoteSha: string,
+  ): Promise<ConflictFile> {
+    // Load contents in parallel
+    const [remoteBytes, localBytes] = await Promise.all([
+      (async () => {
+        const res = await this.client.getBlob({
+          sha: remoteSha,
+          retry: true,
+          maxRetries: 1,
+        });
+        return base64ToArrayBuffer(res.content);
+      })(),
+      this.vault.adapter.readBinary(normalizePath(filePath)),
+    ]);
+    const remoteContent = decodeText(remoteBytes);
+    const localContent = decodeText(localBytes);
+    if (remoteContent === null || localContent === null) {
+      return { filePath, remoteContent: "", localContent: "", binary: true };
+    }
+    return { filePath, remoteContent, localContent, binary: false };
   }
 
   /**

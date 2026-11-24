@@ -1,7 +1,7 @@
 import { IconName, ItemView, Menu, Platform, WorkspaceLeaf } from "obsidian";
 import { Root, createRoot } from "react-dom/client";
 import GitHubSyncPlugin from "src/main";
-import { ConflictFile, ConflictResolution } from "src/sync-manager";
+import { ConflictChoice, ConflictFile } from "src/sync-manager";
 import SplitView from "./split-view/split-view";
 import UnifiedView from "./unified-view/unified-view";
 import { confirmAcceptAll } from "./confirm-accept-all";
@@ -31,7 +31,7 @@ export class ConflictsResolutionView extends ItemView {
     return "Conflicts resolution";
   }
 
-  private resolveAllConflicts(resolutions: ConflictResolution[]) {
+  private resolveAllConflicts(resolutions: ConflictChoice[]) {
     if (this.plugin.conflictsResolver) {
       this.plugin.conflictsResolver(resolutions);
       this.plugin.conflictsResolver = null;

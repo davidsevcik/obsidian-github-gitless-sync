@@ -24,6 +24,22 @@ export function decodeBase64String(s: string): string {
 }
 
 /**
+ * Decodes the content of a file if it's text: valid UTF-8 with no NUL
+ * bytes, which text files never have and most binary files do.
+ *
+ * @returns The text, or null if the content is binary
+ */
+export function decodeText(bytes: ArrayBuffer | Uint8Array): string | null {
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+  return text.includes("\0") ? null : text;
+}
+
+/**
  * Copies the provided text to the system clipboard.
  * Uses the modern Clipboard API with a fallback to older APIs.
  *
