@@ -57,6 +57,9 @@ export interface ConflictFile {
   // One of the versions is not text, so they can't be merged and the
   // contents are empty: the user keeps one version whole
   binary: boolean;
+  // The versions of a binary file, to preview them
+  remoteBytes?: ArrayBuffer;
+  localBytes?: ArrayBuffer;
 }
 
 /// The merged content of a text file
@@ -1201,7 +1204,14 @@ export default class SyncManager {
     const remoteContent = decodeText(remoteBytes);
     const localContent = decodeText(localBytes);
     if (remoteContent === null || localContent === null) {
-      return { filePath, remoteContent: "", localContent: "", binary: true };
+      return {
+        filePath,
+        remoteContent: "",
+        localContent: "",
+        binary: true,
+        remoteBytes,
+        localBytes,
+      };
     }
     return { filePath, remoteContent, localContent, binary: false };
   }

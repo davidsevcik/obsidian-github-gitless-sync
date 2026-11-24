@@ -152,7 +152,10 @@ const UnifiedView = ({
                 />
                 <FilePath filePath={file.filePath} />
                 {file.binary ? (
-                  <BinaryConflict onKeep={(side) => acceptFile(file, side)} />
+                  <BinaryConflict
+                    file={file}
+                    onKeep={(side) => acceptFile(file, side)}
+                  />
                 ) : (
                   <DiffView
                     ref={(handle) => {
