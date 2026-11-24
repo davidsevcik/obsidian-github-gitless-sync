@@ -9,11 +9,14 @@ import {
   createResolutionDecorations,
 } from "./decorations";
 import { acceptAll, conflictStarts } from "./accept-all";
-import { Side } from "../side";
+import { Side, pluralize } from "../side";
+import IconButton from "../icon-button";
+import { createFoldUnchanged } from "./fold-unchanged";
 
 interface DiffViewProps {
   initialRemoteText: string;
   initialLocalText: string;
+  onConflictsLeftChange?: (conflicts: number) => void;
   onConflictResolved: (content: string) => void;
 }
 
@@ -120,8 +123,24 @@ const createUnifiedDocument = (
   return { doc: result.join("\n"), lineRanges };
 };
 
+/// How many conflicts the unified document of the two versions has, the
+/// same count the editor shows
+export const countConflicts = (remoteText: string, localText: string) =>
+  conflictStarts(
+    createUnifiedDocument(remoteText, localText, diff(remoteText, localText))
+      .lineRanges,
+  ).length;
+
 const DiffView = React.forwardRef<DiffViewHandle, DiffViewProps>(
-  ({ initialRemoteText, initialLocalText, onConflictResolved }, ref) => {
+  (
+    {
+      initialRemoteText,
+      initialLocalText,
+      onConflictsLeftChange,
+      onConflictResolved,
+    },
+    ref,
+  ) => {
     const editorViewRef = React.useRef<EditorView | null>(null);
 
     const setup = React.useMemo(() => {
@@ -142,6 +161,9 @@ const DiffView = React.forwardRef<DiffViewHandle, DiffViewProps>(
     const [conflictsLeft, setConflictsLeft] = React.useState(
       () => conflictStarts(lineRanges).length,
     );
+    React.useEffect(() => {
+      onConflictsLeftChange?.(conflictsLeft);
+    }, [conflictsLeft]);
 
     React.useImperativeHandle(
       ref,
@@ -165,9 +187,30 @@ const DiffView = React.forwardRef<DiffViewHandle, DiffViewProps>(
       view.dispatch(acceptAll(view.state, rangesField, side));
     };
 
+    /// Moves the cursor to the next or previous conflict and scrolls to it,
+    /// wrapping around at the ends of the document.
+    const goToConflict = (direction: 1 | -1) => {
+      const view = editorViewRef.current!;
+      const starts = conflictStarts(view.state.field(rangesField));
+      if (starts.length === 0) {
+        return;
+      }
+      const head = view.state.selection.main.head;
+      const target =
+        direction === 1
+          ? (starts.find((pos) => pos > head) ?? starts[0])
+          : ([...starts].reverse().find((pos) => pos < head) ??
+            starts[starts.length - 1]);
+      view.dispatch({
+        selection: { anchor: target },
+        effects: EditorView.scrollIntoView(target, { y: "center" }),
+      });
+    };
+
     const extensions = React.useMemo(() => {
       return [
         rangesField,
+        createFoldUnchanged(lineRanges),
         createLineDecorations(rangesField),
         createResolutionDecorations(rangesField, () => editorViewRef.current!),
         EditorView.updateListener.of((update) => {
@@ -177,6 +220,7 @@ const DiffView = React.forwardRef<DiffViewHandle, DiffViewProps>(
           }
         }),
         EditorView.editable.of(true),
+        EditorView.lineWrapping,
         EditorView.theme({
           "&": {
             backgroundColor: "var(--background-primary)",
@@ -212,25 +256,43 @@ const DiffView = React.forwardRef<DiffViewHandle, DiffViewProps>(
     const hasConflicts = conflictsLeft > 0;
 
     return (
-      <div
-        style={{
-          width: "100%",
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-        }}
-      >
-        <CodeMirror
-          value={doc}
-          height="100%"
-          theme="none"
-          basicSetup={false}
-          extensions={extensions}
-          onCreateEditor={(view: EditorView) => {
-            editorViewRef.current = view;
-          }}
-        />
+      <div className="conflicts-unified-diff">
+        <div className="conflicts-navigation">
+          <div className="conflicts-navigation-count">
+            {conflictsLeft === 0
+              ? "No conflicts left"
+              : `${pluralize(conflictsLeft, "conflict")} left`}
+          </div>
+          {hasConflicts && (
+            <>
+              <IconButton
+                icon="chevron-up"
+                label="Previous conflict"
+                fallbackText="‹"
+                onClick={() => goToConflict(-1)}
+              />
+              <IconButton
+                icon="chevron-down"
+                label="Next conflict"
+                fallbackText="›"
+                onClick={() => goToConflict(1)}
+              />
+            </>
+          )}
+        </div>
+        <div className="conflicts-unified-editor">
+          <CodeMirror
+            value={doc}
+            height="100%"
+            style={{ height: "100%" }}
+            theme="none"
+            basicSetup={false}
+            extensions={extensions}
+            onCreateEditor={(view: EditorView) => {
+              editorViewRef.current = view;
+            }}
+          />
+        </div>
         <div className="conflicts-file-actions">
           <button
             disabled={!hasConflicts}

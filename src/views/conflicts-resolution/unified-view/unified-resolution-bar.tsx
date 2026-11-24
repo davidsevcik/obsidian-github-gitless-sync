@@ -1,4 +1,6 @@
 import * as React from "react";
+import { Menu, Platform } from "obsidian";
+import IconButton from "../icon-button";
 
 interface UnifiedResolutionBarProps {
   onAcceptRemote: () => void;
@@ -15,6 +17,40 @@ const UnifiedResolutionBar: React.FC<UnifiedResolutionBarProps> = ({
   onAcceptBoth,
   onDiscardBoth,
 }) => {
+  // Text links are too small to tap, on mobile the two main choices are
+  // buttons and the rarer ones go in a menu
+  if (Platform.isMobile) {
+    const hasMore = onAcceptBoth !== undefined || onDiscardBoth !== undefined;
+    const showMore = (event: React.MouseEvent) => {
+      const menu = new Menu();
+      if (onAcceptBoth) {
+        menu.addItem((item) =>
+          item.setTitle("Accept both").onClick(onAcceptBoth),
+        );
+      }
+      if (onDiscardBoth) {
+        menu.addItem((item) =>
+          item.setTitle("Discard both").onClick(onDiscardBoth),
+        );
+      }
+      menu.showAtMouseEvent(event.nativeEvent);
+    };
+    return (
+      <div className="conflicts-chunk-buttons">
+        <button onClick={onAcceptRemote}>Accept remote</button>
+        <button onClick={onAcceptLocal}>Accept local</button>
+        {hasMore && (
+          <IconButton
+            icon="more-horizontal"
+            label="More choices"
+            fallbackText="⋯"
+            onClick={showMore}
+          />
+        )}
+      </div>
+    );
+  }
+
   const renderActions = () => {
     return (
       <>
