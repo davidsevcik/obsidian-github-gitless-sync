@@ -7,3 +7,21 @@
     height: 100%;
     width: 100%;
 }
+
+/* Conflicts resolution */
+
+.conflicts-pane-headers {
+    display: flex;
+    flex: 0 0 auto;
+    border-bottom: 1px solid var(--background-modifier-border);
+    background-color: var(--background-primary);
+}
+
+.conflicts-pane-header {
+    flex: 1;
+    padding: var(--size-2-2) var(--size-4-2);
+    font-size: var(--font-ui-small);
+    font-family: var(--font-interface);
+    font-weight: var(--font-semibold);
+    color: var(--text-muted);
+}
