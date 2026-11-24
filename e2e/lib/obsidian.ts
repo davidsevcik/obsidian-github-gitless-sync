@@ -189,7 +189,8 @@ export type Settings = Partial<GitHubSyncSettings>;
  * - keep-local: the content of the device wins
  * - keep-remote: the content of the remote wins
  * - a map from file path to the content to resolve it with
- * Without one a conflict fails the sync.
+ * Without one a conflict fails the sync. Binary files can't be merged, they
+ * need keep-local or keep-remote.
  */
 export type ConflictStrategy =
   | "keep-local"
@@ -412,12 +413,20 @@ export class Device {
          if (!strategy) {
            throw new Error("Unexpected conflicts: " + found.map((c) => c.filePath).join(", "));
          }
-         return found.map((c) => ({
-           filePath: c.filePath,
-           content: strategy === "keep-local" ? c.localContent
-             : strategy === "keep-remote" ? c.remoteContent
-             : strategy[c.filePath],
-         }));
+         return found.map((c) => {
+           if (c.binary) {
+             if (strategy !== "keep-local" && strategy !== "keep-remote") {
+               throw new Error("A binary conflict can only keep a version: " + c.filePath);
+             }
+             return { filePath: c.filePath, keep: strategy === "keep-local" ? "local" : "remote" };
+           }
+           return {
+             filePath: c.filePath,
+             content: strategy === "keep-local" ? c.localContent
+               : strategy === "keep-remote" ? c.remoteContent
+               : strategy[c.filePath],
+           };
+         });
        };
        await plugin.sync();
        await plugin.syncManager.metadataStore.writeQueue;

@@ -7,7 +7,7 @@ import {
 } from "obsidian";
 import { GitHubSyncSettings, DEFAULT_SETTINGS } from "./settings/settings";
 import GitHubSyncSettingsTab from "./settings/tab";
-import SyncManager, { ConflictFile, ConflictResolution } from "./sync-manager";
+import SyncManager, { ConflictChoice, ConflictFile } from "./sync-manager";
 import Logger from "./logger";
 import {
   ConflictsResolutionView,
@@ -31,7 +31,7 @@ export default class GitHubSyncPlugin extends Plugin {
   // This is initialized every time we open the view to set new conflicts so
   // we can notify the SyncManager that everything has been resolved and the sync
   // process can continue on.
-  conflictsResolver: ((resolutions: ConflictResolution[]) => void) | null =
+  conflictsResolver: ((choices: ConflictChoice[]) => void) | null =
     null;
 
   // We keep track of the sync conflicts in here too in case the
@@ -273,7 +273,7 @@ export default class GitHubSyncPlugin extends Plugin {
     this.getConflictsView()?.setConflictFiles(this.conflicts);
   }
 
-  async onConflicts(conflicts: ConflictFile[]): Promise<ConflictResolution[]> {
+  async onConflicts(conflicts: ConflictFile[]): Promise<ConflictChoice[]> {
     this.conflicts = conflicts;
     return await new Promise(async (resolve) => {
       this.conflictsResolver = resolve;

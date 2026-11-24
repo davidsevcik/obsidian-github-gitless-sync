@@ -4,7 +4,10 @@ import * as os from "os";
 import * as path from "path";
 // The mock vault reads and writes a real folder
 import { Vault } from "../mock-obsidian";
-import SyncManager, { ConflictResolution } from "./sync-manager";
+import SyncManager, {
+  ConflictResolution,
+  conflictActionsFor,
+} from "./sync-manager";
 import Logger from "./logger";
 import { DEFAULT_SETTINGS } from "./settings/settings";
 import { MANIFEST_FILE_NAME } from "./metadata-store";
@@ -25,7 +28,11 @@ afterEach(() => {
 
 /// A sync manager on a vault in a temporary folder, the GitHub client
 /// records what would be uploaded instead
-const createSyncManager = (localFiles: Record<string, string>) => {
+const createSyncManager = (
+  localFiles: Record<string, string | Uint8Array>,
+  // The remote blobs by SHA
+  remoteBlobs: Record<string, string | Uint8Array> = {},
+) => {
   const vault = new Vault(vaultDir);
   for (const [filePath, content] of Object.entries(localFiles)) {
     fs.writeFileSync(path.join(vaultDir, filePath), content);
@@ -42,6 +49,9 @@ const createSyncManager = (localFiles: Record<string, string>) => {
   };
   const internals = manager as any;
   internals.client = {
+    getBlob: vi.fn(async ({ sha }: { sha: string }) => ({
+      content: Buffer.from(remoteBlobs[sha]).toString("base64"),
+    })),
     createBlob: vi.fn(async ({ content }: { content: string }) => {
       uploaded.blobs.push(Buffer.from(content, "base64").toString());
       return { sha: `blob-${uploaded.blobs.length}` };
@@ -150,5 +160,75 @@ describe("commitSync", () => {
     });
     await commit(manager, { "diagram.svg": "<svg>local</svg>" }, []);
     expect(uploaded.blobs).toEqual(["<svg>local</svg>"]);
+  });
+});
+
+describe("loadConflictFile", () => {
+  const png = new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0,
+  ]);
+
+  it("loads both versions of a text file", async () => {
+    const { manager } = createSyncManager(
+      { "drawing.svg": "<svg>local</svg>" },
+      { "remote-sha": "<svg>remote</svg>" },
+    );
+    expect(await manager.loadConflictFile("drawing.svg", "remote-sha")).toEqual(
+      {
+        filePath: "drawing.svg",
+        remoteContent: "<svg>remote</svg>",
+        localContent: "<svg>local</svg>",
+        binary: false,
+      },
+    );
+  });
+
+  it("doesn't decode a binary file", async () => {
+    const { manager } = createSyncManager(
+      { "image.png": png },
+      { "remote-sha": png.slice(0, 9) },
+    );
+    expect(await manager.loadConflictFile("image.png", "remote-sha")).toEqual({
+      filePath: "image.png",
+      remoteContent: "",
+      localContent: "",
+      binary: true,
+    });
+  });
+
+  it("can't merge a file that is binary on one side only", async () => {
+    const { manager } = createSyncManager(
+      { "notes.md": "text" },
+      { "remote-sha": png },
+    );
+    expect(
+      (await manager.loadConflictFile("notes.md", "remote-sha")).binary,
+    ).toBe(true);
+  });
+});
+
+describe("conflictActionsFor", () => {
+  it("uploads merged files and writes them after the sync", () => {
+    expect(
+      conflictActionsFor([{ filePath: "note.md", content: "merged" }]),
+    ).toEqual({
+      actions: [{ type: "upload", filePath: "note.md" }],
+      resolutions: [{ filePath: "note.md", content: "merged" }],
+    });
+  });
+
+  it("replaces the other version of a file kept whole", () => {
+    expect(
+      conflictActionsFor([
+        { filePath: "remote.png", keep: "remote" },
+        { filePath: "local.png", keep: "local" },
+      ]),
+    ).toEqual({
+      actions: [
+        { type: "download", filePath: "remote.png" },
+        { type: "upload", filePath: "local.png" },
+      ],
+      resolutions: [],
+    });
   });
 });

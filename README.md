@@ -101,6 +101,8 @@ By default the split view will be used on desktop and the unified one on mobile,
 ![Split conflict resolution](./assets/split_diff_view.png)
 ![Unified conflict resolution](./assets/unified_diff_view.png)
 
+Files that aren't text, like images or PDFs, can't be merged: you keep either the local or the remote version, which replaces the other one.
+
 If you don't want to resolve them you can change the settings to always prefer either the remote or local version in case of conflicts.
 
 ### Config sync
