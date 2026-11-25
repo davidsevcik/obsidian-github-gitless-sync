@@ -6,6 +6,15 @@
     padding: 0;
     height: 100%;
     width: 100%;
+    box-sizing: border-box;
+}
+
+/* On phones the view spans the whole screen: the hidden view header kept it
+   clear of the status bar and camera cutout, and the floating navigation bar
+   covers its bottom. */
+.is-phone .padless-conflicts-view-container {
+    padding-top: var(--safe-area-inset-top);
+    padding-bottom: var(--view-bottom-spacing);
 }
 
 /* Conflicts resolution */
