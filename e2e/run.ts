@@ -11,9 +11,11 @@ import { config, githubToken } from "./lib/config";
 import { Remote } from "./lib/github";
 import { Device, ObsidianApp, provision } from "./lib/obsidian";
 import { Context, DEFAULT_SEED, Scenario } from "./lib/scenario";
+import { screenshots } from "./lib/ui";
 import { installVmfs } from "./lib/vm";
 
 const ROOT = path.join(__dirname, "..");
+const SCREENSHOTS_DIR = path.join(__dirname, "screenshots");
 
 interface Options {
   filters: string[];
@@ -114,6 +116,7 @@ async function runScenario(
   );
   const branch = `${config.branchPrefix}${runId}-${index}-${slug(scenario.name)}`;
   console.log(`\n▶ ${entry.id} ${dim(`(${branch})`)}`);
+  screenshots.dir = path.join(SCREENSHOTS_DIR, runId, `${index}-${slug(entry.id)}`);
   const started = Date.now();
 
   let remote: Remote | null = null;
@@ -215,6 +218,12 @@ async function printDiagnostics(
     }
     if (!app.running) {
       await app.launch();
+    }
+    for (const device of devices) {
+      const file = await device.window.screenshot("failure");
+      if (file) {
+        console.log(dim(`    Screenshot of ${device.label}: ${path.relative(ROOT, file)}`));
+      }
     }
   } catch (err) {
     console.log(dim(`    Diagnostics failed: ${err}`));
