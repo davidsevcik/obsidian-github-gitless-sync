@@ -47,6 +47,13 @@ The runner sets everything else up: it creates the vaults `~/Vaults/e2e-a` and `
 
 Screenshots go to `e2e/screenshots/<run>/<n>-<scenario>/`, which git ignores.
 
+The screenshots of the conflicts view in the main README come from the `gui` scenarios: they take them with `readmeScreenshot`, cropped to the main area and without notices. To update them:
+
+```sh
+npm run e2e -- @gui
+npm run e2e:readme-screenshots   # copies the newest of each to assets/
+```
+
 Scenarios run one at a time, they share the vaults and the Obsidian app.
 
 ## Writing a scenario
@@ -91,7 +98,7 @@ What `run` gets:
   - `sync()` syncs like the "Sync with GitHub" command and returns the notices it showed. A sync showing an error fails the scenario, unless `expectError` is set. A conflict fails it too, unless `conflicts` says how to resolve it: `"keep-local"`, `"keep-remote"` or a map from path to content.
   - `disablePlugin`, `enablePlugin`.
   - `startSync()` syncs with the real conflicts view: it returns once the sync has started, and `result()` waits for the end. Resolve the conflicts with `window` meanwhile.
-  - `window`: the vault's window, used like the user would, see `AppWindow` in `lib/ui.ts`. `click("Keep local")` finds the element showing that text or with that label and clicks its center with the mouse. It looks in the topmost layer (an open menu, else a modal, else the conflicts view), unless `within` says where. A click fails if the text matches several elements and `nth` doesn't pick one, or if something else covers the element, as it would stop the user. `focus({ width, height })` resizes the window, under 600 pixels wide it's laid out like a phone, without the sidebar. `waitForConflictsView`, `waitForText`, `texts`, `boxes` and `inspect` read what the window shows, and `screenshot(name)` saves a screenshot of it.
+  - `window`: the vault's window, used like the user would, see `AppWindow` in `lib/ui.ts`. `click("Keep local")` finds the element showing that text or with that label and clicks its center with the mouse. It looks in the topmost layer (an open menu, else a modal, else the conflicts view), unless `within` says where. A click fails if the text matches several elements and `nth` doesn't pick one, or if something else covers the element, as it would stop the user. `focus({ width, height })` resizes the window, under 600 pixels wide it's laid out like a phone, without the sidebar. `waitForConflictsView`, `waitForText`, `texts`, `boxes` and `inspect` read what the window shows, `screenshot(name)` saves a screenshot of it and `readmeScreenshot(asset)` one for the README.
 - `remote`: the branch, see `lib/github.ts`. `commit` changes it outside of the plugin, like git would. `files`, `read`, `manifest` and `commitMessages` read it.
 - `obsidian.whileClosed(fn)`: closes Obsidian, runs `fn`, and opens it again. It closes all the devices.
 - `step(title, fn)`: names a part of the scenario for the output and for failures.
