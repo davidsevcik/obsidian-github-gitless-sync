@@ -27,6 +27,9 @@ export const VIEW = '.workspace-leaf-content[data-type="conflicts-resolution-vie
  */
 export const screenshots = { dir: null as string | null };
 
+// Screenshots named with it are copied to assets/ by e2e/readme-screenshots.ts
+export const README_PREFIX = "readme-";
+
 export interface Target {
   // Exact text of the element, or its aria-label
   text: string;
@@ -241,14 +244,30 @@ export class AppWindow {
   /**
    * Saves a screenshot of the window, if the runner asked for screenshots.
    * Returns where it's saved.
+   * @param options.of Selector of the element to crop the screenshot to
+   * @param options.clean Removes notices and tooltips first, for the README
    */
-  async screenshot(name: string): Promise<string | null> {
+  async screenshot(
+    name: string,
+    options: { of?: string; clean?: boolean } = {},
+  ): Promise<string | null> {
     if (!screenshots.dir) {
       return null;
     }
     await this.focus(await this.size());
     const bounds = await this.evaluate<{ x: number; y: number; width: number; height: number }>(
-      `${HELPERS} return win.getContentBounds();`,
+      `${HELPERS}
+       if (args.clean) {
+         document.querySelectorAll(".notice, .tooltip").forEach((el) => el.remove());
+       }
+       const b = win.getContentBounds();
+       if (!args.of) return b;
+       const el = document.querySelector(args.of);
+       if (!el) throw new Error("Nothing to crop the screenshot to: " + args.of);
+       const r = el.getBoundingClientRect();
+       return { x: Math.round(b.x + r.left), y: Math.round(b.y + r.top),
+                width: Math.round(r.width), height: Math.round(r.height) };`,
+      options,
     );
     const remotePath = `/tmp/e2e-screenshot-${process.pid}.png`;
     const res = await sshExec(
@@ -262,5 +281,17 @@ export class AppWindow {
     const file = path.join(screenshots.dir, `${this.vault}-${name}.png`);
     writeFileSync(file, Buffer.from(res.stdout.replace(/\s/g, ""), "base64"));
     return file;
+  }
+
+  /**
+   * Saves a screenshot of the main area of the window for the README, see
+   * e2e/readme-screenshots.ts. Name it like the file in assets/, without
+   * the .png.
+   */
+  async readmeScreenshot(asset: string): Promise<string | null> {
+    return this.screenshot(`${README_PREFIX}${asset}`, {
+      of: ".workspace-split.mod-root",
+      clean: true,
+    });
   }
 }

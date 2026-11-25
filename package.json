@@ -10,7 +10,8 @@
     "benchmark": "tsx benchmark.ts",
     "e2e": "tsx e2e/run.ts",
     "e2e:check": "tsc -noEmit -p e2e",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e:readme-screenshots": "tsx e2e/readme-screenshots.ts"
   },
   "keywords": [],
   "author": "David Sevcik",

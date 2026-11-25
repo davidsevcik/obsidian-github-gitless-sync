@@ -98,10 +98,20 @@ information to correctly resolve it.
 
 By default the split view will be used on desktop and the unified one on mobile, you can change the settings to always use the one you prefer.
 
-![Split conflict resolution](./assets/split_diff_view.png)
-![Unified conflict resolution](./assets/unified_diff_view.png)
+The split view shows the remote and the local version side by side, the arrows between them take the lines of one side.
 
-Files that aren't text, like images or PDFs, can't be merged: you keep either the local or the remote version, which replaces the other one.
+![Split conflict resolution](./assets/split_diff_view.png)
+
+The unified view lists the files with conflicts, then shows one file at a time with the remote lines in red and the local ones in green.
+
+![Unified conflict resolution, the list of files](./assets/unified_file_list.png)
+![Unified conflict resolution, a file](./assets/unified_diff_view.png)
+
+Both views can keep the local or the remote version of all the files at once, after asking you first.
+
+Files that aren't text, like images or PDFs, can't be merged: you keep either the local or the remote version, which replaces the other one. Images show both versions, and every file shows the size of each version.
+
+![Conflict on an image](./assets/binary_conflict.png)
 
 If you don't want to resolve them you can change the settings to always prefer either the remote or local version in case of conflicts.
 

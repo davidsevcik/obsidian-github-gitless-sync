@@ -15,13 +15,15 @@ export const PNG = Buffer.from(
 export const PNG_FROM_A = Buffer.concat([PNG, Buffer.from("from A\0")]);
 export const PNG_FROM_B = Buffer.concat([PNG, Buffer.from("from B\0")]);
 
+type Rgb = [number, number, number];
+
 /**
- * A PNG of one color, big enough to see in a screenshot.
+ * A PNG drawn by a function giving the color of each pixel.
  */
-export function solidPng(
+export function drawPng(
   width: number,
   height: number,
-  [r, g, b]: [number, number, number],
+  pixel: (x: number, y: number) => Rgb,
 ): Buffer {
   const chunk = (type: string, data: Buffer) => {
     const length = Buffer.alloc(4);
@@ -36,23 +38,67 @@ export function solidPng(
   header.writeUInt32BE(height, 4);
   header[8] = 8; // bit depth
   header[9] = 2; // RGB
-  // Each row starts with filter type 0
-  const row = Buffer.concat([
-    Buffer.from([0]),
-    Buffer.from(Array.from({ length: width }, () => [r, g, b]).flat()),
-  ]);
-  const pixels = deflateSync(Buffer.concat(Array.from({ length: height }, () => row)));
+  const raw = Buffer.alloc(height * (1 + width * 3));
+  for (let y = 0; y < height; y++) {
+    const row = y * (1 + width * 3);
+    raw[row] = 0; // filter type of the row
+    for (let x = 0; x < width; x++) {
+      raw.set(pixel(x, y).map(Math.round), row + 1 + x * 3);
+    }
+  }
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", header),
-    chunk("IDAT", pixels),
+    chunk("IDAT", deflateSync(raw)),
     chunk("IEND", Buffer.alloc(0)),
   ]);
 }
 
-// The versions of an image two devices made, red and blue
-export const RED_PNG = solidPng(120, 80, [220, 40, 40]);
-export const BLUE_PNG = solidPng(160, 80, [40, 80, 220]);
+const mix = (a: Rgb, b: Rgb, t: number): Rgb =>
+  [0, 1, 2].map((i) => a[i] + (b[i] - a[i]) * t) as Rgb;
+
+/**
+ * A landscape: a sky, a sun and two hills, in the colors given.
+ */
+function landscape(colors: {
+  skyTop: Rgb;
+  skyBottom: Rgb;
+  sun: Rgb;
+  sunAt: [number, number];
+  farHill: Rgb;
+  nearHill: Rgb;
+}): Buffer {
+  const width = 360;
+  const height = 240;
+  return drawPng(width, height, (x, y) => {
+    const near = height * 0.78 - 30 * Math.sin((x / width) * Math.PI * 1.3 + 0.6);
+    const far = height * 0.6 - 40 * Math.sin((x / width) * Math.PI * 2 + 2.1);
+    if (y > near) return colors.nearHill;
+    if (y > far) return colors.farHill;
+    const [sx, sy] = colors.sunAt;
+    if (Math.hypot(x - sx, y - sy) < 26) return colors.sun;
+    return mix(colors.skyTop, colors.skyBottom, y / height);
+  });
+}
+
+// Two versions of a photo, as two devices could make: the day and the
+// sunset. They're the same size, their bytes differ.
+export const DAY_PNG = landscape({
+  skyTop: [70, 140, 220],
+  skyBottom: [190, 225, 250],
+  sun: [255, 236, 140],
+  sunAt: [270, 60],
+  farHill: [110, 160, 110],
+  nearHill: [60, 120, 70],
+});
+export const SUNSET_PNG = landscape({
+  skyTop: [70, 50, 120],
+  skyBottom: [250, 150, 90],
+  sun: [255, 200, 90],
+  sunAt: [110, 130],
+  farHill: [120, 70, 90],
+  nearHill: [60, 40, 60],
+});
 
 // Bytes that aren't an image, nor valid UTF-8 so they're not taken for text
 export const BROKEN_IMAGE = Buffer.from([0xff, 0xfe, 0x00, 0x42, 0x61, 0x64]);
