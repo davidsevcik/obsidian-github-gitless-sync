@@ -3,6 +3,7 @@ import {
   GitHubSyncSettings,
 } from "../../src/settings/settings";
 import { config, githubToken } from "./config";
+import { AppWindow } from "./ui";
 import { sleep, sshExec, vmfs, waitFor } from "./vm";
 
 const PLUGIN_ID = config.pluginId;
@@ -203,6 +204,16 @@ export interface SyncOptions {
   expectError?: true | RegExp;
 }
 
+export interface PendingSync {
+  // Waits for the sync to end, it fails like Device.sync
+  result(timeoutMs?: number): Promise<SyncResult>;
+}
+
+// Code collecting the texts of the notices the sync showed into notices
+const COLLECT_NOTICES = `const notices = [...document.querySelectorAll(".notice")]
+  .map((n) => (n.textContent ?? "").trim())
+  .filter((t) => t !== "Syncing...");`;
+
 export interface SyncResult {
   // Notices the sync showed, e.g. "Sync successful\nSent: added New.md"
   notices: string[];
@@ -235,6 +246,8 @@ export class Device {
   readonly vault: string;
   // Name of the device in sync commits
   readonly label: string;
+  // The window of the vault, to use it with the mouse
+  readonly window: AppWindow;
 
   constructor(
     readonly name: string,
@@ -245,6 +258,9 @@ export class Device {
     }
     this.vault = `e2e-${name}`;
     this.label = name.toUpperCase();
+    this.window = new AppWindow(this.vault, (body, args) =>
+      this.evaluate(body, args),
+    );
   }
 
   private evaluate<T>(body: string, args: unknown = null): Promise<T> {
@@ -430,15 +446,71 @@ export class Device {
        };
        await plugin.sync();
        await plugin.syncManager.metadataStore.writeQueue;
-       const notices = [...document.querySelectorAll(".notice")]
-         .map((n) => (n.textContent ?? "").trim())
-         .filter((t) => t !== "Syncing...");
+       ${COLLECT_NOTICES}
        return { notices, summary: notices.join("\\n"), conflicts };`,
       { pluginId: PLUGIN_ID, conflicts: options.conflicts ?? null },
     );
     // Downloaded files trigger events too
     await this.settle();
+    this.checkSyncResult(result, options);
+    return result;
+  }
 
+  /**
+   * Starts a sync that shows conflicts in the conflicts view, for the
+   * scenario to resolve them with the mouse in the window. Wait for the end
+   * of the sync with the result.
+   */
+  async startSync(options: Omit<SyncOptions, "conflicts"> = {}): Promise<PendingSync> {
+    const key = `${process.pid}-${Date.now()}`;
+    await this.evaluate(
+      `const plugin = app.plugins.plugins[args.pluginId];
+       if (!plugin) throw new Error("The plugin is not loaded");
+       document.querySelectorAll(".notice").forEach((n) => n.remove());
+       const conflicts = [];
+       // The plugin's own handler opens the view, sync replaces it
+       plugin.syncManager.onConflicts = (found) => {
+         conflicts.push(...found.map((c) => c.filePath));
+         return plugin.onConflicts(found);
+       };
+       const syncs = (window.__e2eSyncs ??= {});
+       syncs[args.key] = { result: null };
+       plugin.sync()
+         .then(() => plugin.syncManager.metadataStore.writeQueue)
+         .then(() => {
+           ${COLLECT_NOTICES}
+           syncs[args.key].result = { value: { notices, summary: notices.join("\\n"), conflicts } };
+         })
+         .catch((err) => (syncs[args.key].result = { error: String(err?.message ?? err) }));`,
+      { pluginId: PLUGIN_ID, key },
+    );
+    return {
+      result: async (timeoutMs = 60_000) => {
+        let result: { value: SyncResult } | { error: string } | null = null;
+        await waitFor(
+          `the sync on ${this.label} to end`,
+          async () => {
+            result = await this.evaluate(
+              `return window.__e2eSyncs?.[args]?.result ?? null;`,
+              key,
+            );
+            return result !== null;
+          },
+          timeoutMs,
+          1000,
+        );
+        const done = result as unknown as { value: SyncResult } | { error: string };
+        if ("error" in done) {
+          throw new Error(`Sync on ${this.label} threw: ${done.error}`);
+        }
+        await this.settle();
+        this.checkSyncResult(done.value, options);
+        return done.value;
+      },
+    };
+  }
+
+  private checkSyncResult(result: SyncResult, options: SyncOptions) {
     const error = result.notices.find((n) => n.startsWith("Error syncing"));
     if (options.expectError) {
       if (!error) {
@@ -457,7 +529,6 @@ export class Device {
     } else if (error) {
       throw new Error(`Sync on ${this.label} failed: ${error}`);
     }
-    return result;
   }
 
   /**
@@ -494,6 +565,11 @@ export class Device {
       ...settings,
       githubToken: githubToken(),
     };
+    // A scenario may have left the conflicts view or a modal open
+    await this.evaluate(
+      `document.querySelectorAll(".modal-close-button").forEach((b) => b.click());
+       app.workspace.detachLeavesOfType("conflicts-resolution-view");`,
+    );
     await this.disablePlugin();
     await vmfs({ op: "reset", vault: this.vault, settings: full });
     await waitFor(`Obsidian to see ${this.vault} emptied`, () =>
